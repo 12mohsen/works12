@@ -6531,6 +6531,84 @@ var FCM_SEND_URL = "https://works12.vercel.app/api/send-notification";
 
 var fcmMessaging = null;
 
+// ══════════════════════════════════════════════════════════════
+// نظام صوت الإشعارات — Web Audio API (بدون ملف خارجي)
+// ══════════════════════════════════════════════════════════════
+var _fcmAudioCtx = null;
+var _fcmAudioUnlocked = false;
+
+// تفعيل AudioContext عند أول تفاعل (يتخطى حظر Autoplay)
+function _unlockFCMAudio() {
+  if (_fcmAudioUnlocked) return;
+  try {
+    _fcmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // تشغيل صوت صامت لفتح القفل
+    var buf = _fcmAudioCtx.createBuffer(1, 1, 22050);
+    var src = _fcmAudioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(_fcmAudioCtx.destination);
+    src.start(0);
+    _fcmAudioUnlocked = true;
+    console.log('[FCM Sound] Audio unlocked');
+  } catch(e) { console.warn('[FCM Sound] Unlock failed:', e); }
+}
+
+// ربط فتح القفل بأول نقرة/لمسة من المستخدم
+document.addEventListener('click', _unlockFCMAudio, { once: false });
+document.addEventListener('touchstart', _unlockFCMAudio, { once: false });
+
+// تشغيل صوت تنبيه (نغمة مولّدة — لا تحتاج ملف)
+function playFCMNotificationSound() {
+  try {
+    if (!_fcmAudioCtx) {
+      _fcmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (_fcmAudioCtx.state === 'suspended') _fcmAudioCtx.resume();
+
+    var ctx = _fcmAudioCtx;
+
+    // ── النغمة الأولى (عالية) ──
+    var osc1 = ctx.createOscillator();
+    var gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.value = 880;       // نغمة A5
+    gain1.gain.value = 1.0;           // أقصى صوت
+    gain1.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.15);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.15);
+
+    // ── النغمة الثانية (أعلى) بعد فاصل قصير ──
+    var osc2 = ctx.createOscillator();
+    var gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.value = 1175;      // نغمة D6
+    gain2.gain.value = 1.0;
+    gain2.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.35);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(ctx.currentTime + 0.18);
+    osc2.stop(ctx.currentTime + 0.35);
+
+    // ── النغمة الثالثة (الأعلى) ──
+    var osc3 = ctx.createOscillator();
+    var gain3 = ctx.createGain();
+    osc3.type = 'sine';
+    osc3.frequency.value = 1397;      // نغمة F6
+    gain3.gain.value = 1.0;
+    gain3.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.7);
+    osc3.connect(gain3);
+    gain3.connect(ctx.destination);
+    osc3.start(ctx.currentTime + 0.38);
+    osc3.stop(ctx.currentTime + 0.7);
+
+    console.log('[FCM Sound] Playing notification sound');
+  } catch(e) {
+    console.warn('[FCM Sound] Play failed:', e);
+  }
+}
+
 function initFCM() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FCM_CONFIG);
@@ -6540,9 +6618,18 @@ function initFCM() {
       console.log('[FCM] Foreground:', payload);
       var t = payload.notification?.title || '';
       var b = payload.notification?.body || '';
+
+      // تشغيل صوت التنبيه فوراً
+      playFCMNotificationSound();
+
+      // عرض Toast داخل التطبيق
       if (typeof toast === 'function') toast(t + ': ' + b, 'ok');
-      if (document.hidden && Notification.permission === 'granted') {
-        new Notification(t, { body: b, icon: '/icon-192.png', dir: 'rtl' });
+
+      // إشعار نظام (مع صوت النظام الافتراضي)
+      if (Notification.permission === 'granted') {
+        var n = new Notification(t, { body: b, icon: '/icon-192.png', dir: 'rtl', silent: false });
+        // إعادة تشغيل الصوت عند الضغط على الإشعار
+        n.onclick = function() { window.focus(); };
       }
     });
     return true;
@@ -6592,7 +6679,17 @@ function saveFCMTokenToSupabase(token) {
 function setupFCMNotifications() {
   registerFCMAndGetToken()
     .then(function(t) { return saveFCMTokenToSupabase(t); })
-    .then(function() { console.log('[FCM] Ready!'); })
+    .then(function() {
+      console.log('[FCM] Ready!');
+      // استقبال رسائل من Service Worker عند عودة المستخدم
+      if (navigator.serviceWorker) {
+        navigator.serviceWorker.addEventListener('message', function(event) {
+          if (event.data && event.data.type === 'FCM_NOTIFICATION') {
+            playFCMNotificationSound();
+          }
+        });
+      }
+    })
     .catch(function(e) { console.warn('[FCM] Skipped:', e.message); });
 }
 

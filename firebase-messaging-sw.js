@@ -44,6 +44,13 @@ messaging.onBackgroundMessage(function(payload) {
     ]
   };
 
+  // إبلاغ الصفحة المفتوحة (إن وجدت) لتشغيل الصوت
+  clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
+    cls.forEach(function(client) {
+      client.postMessage({ type: 'FCM_NOTIFICATION', title: notificationTitle, body: notificationOptions.body });
+    });
+  });
+
   return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
