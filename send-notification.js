@@ -49,22 +49,46 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // ── بناء الإشعار ──
+    // ── بناء الإشعار مع الصوت لكل المنصات ──
     const message = {
       notification: { title, body },
-      data: data || {},
+      data: Object.assign({ sound: 'true', playSound: 'true' }, data || {}),
+
+      // Android — صوت افتراضي + أولوية عالية
       android: {
         priority: 'high',
-        notification: { sound: 'default', channelId: 'high_importance_channel' }
+        notification: {
+          sound: 'default',
+          channelId: 'high_importance_channel',
+          defaultSound: true,
+          notificationPriority: 'PRIORITY_MAX',
+          visibility: 'PUBLIC'
+        }
       },
+
+      // iOS (APNS) — صوت افتراضي + أولوية فورية
+      apns: {
+        headers: { 'apns-priority': '10' },
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+            'content-available': 1
+          }
+        }
+      },
+
+      // Web Push — أولوية عالية
       webpush: {
-        headers: { Urgency: 'high' },
+        headers: { Urgency: 'high', TTL: '86400' },
         notification: {
           icon: '/icon-192.png',
           badge: '/badge-72.png',
           requireInteraction: true,
-          dir: 'rtl'
-        }
+          dir: 'rtl',
+          silent: false
+        },
+        fcmOptions: { link: '/' }
       }
     };
 
