@@ -788,6 +788,14 @@ tr:hover{background:rgba(255,255,255,.03)}
     <main class="dmain">
       <!-- Overview -->
       <div class="dpg on" id="apg-a-overview">
+        <!-- ══ زر اختبار الصوت والإشعار (مؤقت) ══ -->
+        <div id="fcm-test-box" style="margin-bottom:16px;padding:16px 20px;background:linear-gradient(135deg,rgba(52,152,219,.15),rgba(46,204,113,.08));border:2px dashed rgba(52,152,219,.4);border-radius:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#3498DB">🔔 اختبار الصوت والإشعار</div>
+            <div style="font-size:11px;color:var(--mu);margin-top:3px">اضغط الزر لتجربة الصوت والإشعار المحلي فوراً (بدون سيرفر)</div>
+          </div>
+          <button onclick="testFCMSoundAndNotification()" style="padding:10px 24px;background:linear-gradient(135deg,#3498DB,#2ECC71);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Tajawal',sans-serif;white-space:nowrap;transition:transform .15s" onmousedown="this.style.transform='scale(.95)'" onmouseup="this.style.transform='scale(1)'">🔊 تجربة الصوت والإشعار الآن</button>
+        </div>
         <div class="dph"><div class="dpt">📊 نظرة عامة</div><div class="dps">ملخص شامل للمنصة — أنت ترى كل شيء</div></div>
         <div class="sg">
           <div class="st s-g"><div class="stl">إجمالي المنتجات</div><div class="stv" id="a-tp">0</div></div>
@@ -1590,6 +1598,7 @@ function _fullSyncAll(){
   }).catch(function(e){console.log('[AutoSync] users err:',e.message)});
 
   // 3) مزامنة الطلبات — السحابة هي المصدر الوحيد (بدون تكرار)
+  var _orderCountBefore = getOrders().length;
   supaFetch('orders','GET',null,'?select=*&order=order_date.desc').then(function(rows){
     if(!rows||!Array.isArray(rows))return;
     var deletedOIds=getDeletedOrderIds();
@@ -1623,6 +1632,13 @@ function _fullSyncAll(){
     });
     saveOrders(cleanOrders);
     anyChange=true;
+    // إشعار صوتي عند طلب جديد
+    if(cleanOrders.length > _orderCountBefore && currentUser) {
+      var _newCount = cleanOrders.length - _orderCountBefore;
+      if(currentUser.role === 'admin' || currentUser.role === 'vendor') {
+        _fcmLocalAlert('🛒 طلب جديد!', 'وصلك ' + _newCount + ' طلب جديد');
+      }
+    }
   }).catch(function(e){console.log('[AutoSync] orders err:',e.message)});
 
   // 4) مزامنة الرسائل (مع فلترة المحذوفات + حذفها من Supabase نهائياً)
@@ -1641,10 +1657,35 @@ function _fullSyncAll(){
       }
       var lm=localM.find(function(m){return String(m.id)===mid});
       if(!lm){
-        localM.push({id:mid,from:cm.sender_type||'',fromId:cm.sender_id||'',fromName:cm.sender_name||'',fromEmail:cm.sender_email||'',text:cm.message_text||'',reply:cm.reply_text||'',read:cm.is_read||false,toRole:cm.to_role||null,toId:cm.to_id||null,toName:cm.to_name||null,toEmail:cm.to_email||null,image:cm.image_url||'',date:cm.created_at?(cm.created_at+'').slice(0,10):new Date().toISOString().slice(0,10),_cloud:true});
+        var _newMsg={id:mid,from:cm.sender_type||'',fromId:cm.sender_id||'',fromName:cm.sender_name||'',fromEmail:cm.sender_email||'',text:cm.message_text||'',reply:cm.reply_text||'',read:cm.is_read||false,toRole:cm.to_role||null,toId:cm.to_id||null,toName:cm.to_name||null,toEmail:cm.to_email||null,image:cm.image_url||'',date:cm.created_at?(cm.created_at+'').slice(0,10):new Date().toISOString().slice(0,10),_cloud:true};
+        localM.push(_newMsg);
         changed=true;
+        // إشعار صوتي للرسائل الجديدة الموجهة للمستخدم الحالي
+        if(!_newMsg.read && currentUser) {
+          var _isForMe = false;
+          var _myRole = currentUser.role;
+          var _myEmail = currentUser.email;
+          // رسالة موجهة لدوري
+          if(_newMsg.toRole === _myRole) _isForMe = true;
+          // رسالة موجهة لي شخصياً
+          if(_newMsg.toEmail === _myEmail) _isForMe = true;
+          // أنا أدمن وهذه رسالة من شريك/عميل للإدارة
+          if(_myRole === 'admin' && (!_newMsg.toRole || _newMsg.toRole === 'admin')) _isForMe = true;
+          // أنا شريك/عميل وهذه رد من الأدمن لي
+          if(_newMsg.from === 'admin' && _newMsg.toEmail === _myEmail) _isForMe = true;
+          // رسالة فيها رد جديد موجه لي
+          if(_newMsg.reply && _newMsg.fromEmail === _myEmail) _isForMe = true;
+          if(_isForMe) {
+            _fcmLocalAlert('📩 رسالة جديدة', (_newMsg.fromName||_newMsg.from||'مستخدم') + ': ' + (_newMsg.text||'').substring(0,60));
+          }
+        }
       } else {
-        if(cm.reply_text&&!lm.reply){lm.reply=cm.reply_text;lm.read=true;changed=true}
+        if(cm.reply_text&&!lm.reply){lm.reply=cm.reply_text;lm.read=true;changed=true;
+          // إشعار صوتي عند وصول رد جديد
+          if(currentUser && lm.fromEmail === currentUser.email) {
+            _fcmLocalAlert('💬 رد جديد على رسالتك', (cm.reply_text||'').substring(0,60));
+          }
+        }
         if(cm.is_read&&!lm.read){lm.read=true;changed=true}
         if(cm.image_url&&!lm.image){lm.image=cm.image_url;changed=true}
       }
@@ -2215,7 +2256,10 @@ function loadMessagesFromSupabase(){
       if(deletedIds.indexOf(String(lm.id))!==-1)return;
       if(!cloudIds.find(function(cid){return String(cid)===String(lm.id)})){saveMessageToSupabase(lm)}
     });
-    if(merged){saveMessages(localMsgs);console.log('[CloudSync] تم دمج الرسائل');_postSyncRefresh()}
+    if(merged){saveMessages(localMsgs);console.log('[CloudSync] تم دمج الرسائل');_postSyncRefresh();
+      // إشعار صوتي
+      if(currentUser) _fcmLocalAlert('📩 رسائل جديدة', 'تم استلام رسائل جديدة');
+    }
     return localMsgs;
   }).catch(function(e){console.error('[CloudSync] ❌ خطأ تحميل الرسائل:',e);toast('❌ خطأ تحميل الرسائل: '+e.message,'err');return null});
 }
@@ -6745,54 +6789,42 @@ function setupFCMNotifications() {
     .catch(function(e) { console.warn('[FCM] Skipped:', e.message); });
 }
 
-// ── دوال الإرسال (للأدمن) ──
-function getFCMTokensByRole(role) {
-  var q = '?select=fcm_token&is_active=eq.true';
-  if (role && role !== 'all') q += '&user_role=eq.' + role;
-  return supaFetch('fcm_tokens', 'GET', null, q).then(function(rows) {
-    return (rows || []).map(function(r) { return r.fcm_token; });
-  });
-}
-
-function sendNotificationToRole(role, title, body) {
-  return getFCMTokensByRole(role).then(function(tokens) {
-    if (!tokens.length) {
-      if (typeof toast === 'function') toast('لا يوجد مسجلون لهذا الدور', 'wa');
-      return { success: false };
-    }
-    return fetch(FCM_SEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tokens: tokens, title: title, body: body })
-    }).then(function(r) { return r.json(); })
-      .then(function(result) {
-        if (result.success && typeof toast === 'function')
-          toast('تم الإرسال (' + result.summary.sent + '/' + result.summary.total + ')', 'ok');
-        if (result.invalidTokens && result.invalidTokens.length)
-          result.invalidTokens.forEach(function(t) {
-            supaFetch('fcm_tokens', 'DELETE', null, '?fcm_token=eq.' + encodeURIComponent(t));
-          });
-        return result;
+// ══════════════════════════════════════════════════════════════
+// إشعار صوتي محلي عند وصول رسالة/طلب جديد
+// ══════════════════════════════════════════════════════════════
+function _fcmLocalAlert(title, body) {
+  // 1) صوت
+  try { playFCMNotificationSound(); } catch(e) {}
+  // 2) اهتزاز
+  if (navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch(e) {}
+  // 3) إشعار نظام
+  if (Notification.permission === 'granted') {
+    try {
+      var n = new Notification(title, {
+        body: body, icon: '/icon-192.png', dir: 'rtl', lang: 'ar',
+        tag: 'local-' + Date.now(), silent: true, requireInteraction: false
       });
-  });
+      n.onclick = function() { window.focus(); n.close(); };
+      setTimeout(function() { n.close(); }, 8000);
+    } catch(e) {}
+  }
+  // 4) Toast
+  if (typeof toast === 'function') toast(title + ': ' + body, 'ok');
 }
 
-function sendNotificationToUser(email, title, body) {
-  return supaFetch('fcm_tokens', 'GET', null,
-    '?select=fcm_token&is_active=eq.true&user_email=eq.' + encodeURIComponent(email)
-  ).then(function(rows) {
-    var tokens = (rows || []).map(function(r) { return r.fcm_token; });
-    if (!tokens.length) {
-      if (typeof toast === 'function') toast('المستخدم غير مسجل للإشعارات', 'wa');
-      return { success: false };
-    }
-    return fetch(FCM_SEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tokens: tokens, title: title, body: body })
-    }).then(function(r) { return r.json(); });
-  });
-}
-</script>
-</body>
-</html>
+// ══════════════════════════════════════════════════════════════
+// زر اختبار الصوت والإشعار المحلي (بدون سيرفر)
+// ══════════════════════════════════════════════════════════════
+function testFCMSoundAndNotification() {
+  console.log('[FCM TEST] === بدء الاختبار ===');
+
+  // 1) تشغيل الصوت المدمج
+  console.log('[FCM TEST] Step 1: Playing sound...');
+  playFCMNotificationSound();
+
+  // 2) اهتزاز (موبايل)
+  if (navigator.vibrate) {
+    try { navigator.vibrate([300, 100, 300]); } catch(e) {}
+  }
+
+  // 3) إشعار م
