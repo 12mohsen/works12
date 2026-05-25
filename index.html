@@ -1248,6 +1248,77 @@ tr:hover{background:rgba(255,255,255,.03)}
 </div>
 
 <script>
+/* ══════════════════ إشعار صوتي محلي (يجب أن يكون أول شيء) ══════════════════ */
+function _fcmLocalAlert(title, body) {
+  try {
+    // 1) صوت — نستخدم playFCMNotificationSound إذا جاهزة، وإلا نولّد صوت بسيط
+    if (typeof playFCMNotificationSound === 'function') {
+      playFCMNotificationSound();
+    } else {
+      try {
+        var _ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var _osc = _ctx.createOscillator(); var _g = _ctx.createGain();
+        _osc.frequency.value = 880; _g.gain.value = 1.0;
+        _osc.connect(_g); _g.connect(_ctx.destination);
+        _osc.start(); _osc.stop(_ctx.currentTime + 0.3);
+      } catch(e2) {}
+    }
+    // 2) اهتزاز
+    if (navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch(e) {}
+    // 3) إشعار نظام
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        var n = new Notification(title, {
+          body: body, icon: '/icon-192.png', dir: 'rtl', lang: 'ar',
+          tag: 'local-' + Date.now(), silent: true, requireInteraction: false
+        });
+        n.onclick = function() { window.focus(); n.close(); };
+        setTimeout(function() { n.close(); }, 8000);
+      } catch(e) {}
+    }
+    // 4) Toast
+    if (typeof toast === 'function') toast(title + ': ' + body, 'ok');
+  } catch(e) { console.warn('[FCM Alert] error:', e); }
+}
+/* ══════════════════ زر اختبار الصوت والإشعار (مؤقت) ══════════════════ */
+function testFCMSoundAndNotification() {
+  console.log('[FCM TEST] بدء الاختبار');
+  // 1) تشغيل الصوت
+  if (typeof playFCMNotificationSound === 'function') {
+    playFCMNotificationSound();
+  } else {
+    try {
+      var _ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var _osc = _ctx.createOscillator(); var _g = _ctx.createGain();
+      _osc.frequency.value = 880; _g.gain.value = 1.0;
+      _osc.connect(_g); _g.connect(_ctx.destination);
+      _osc.start(); _osc.stop(_ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+  // 2) اهتزاز
+  if (navigator.vibrate) try { navigator.vibrate([300, 100, 300]); } catch(e) {}
+  // 3) إشعار محلي
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      var n = new Notification('اختبار ناجح!', {
+        body: 'الصوت والإشعار يعملان — ' + new Date().toLocaleTimeString('ar'),
+        icon: '/icon-192.png', dir: 'rtl', lang: 'ar',
+        tag: 'fcm-test-' + Date.now(), silent: true, requireInteraction: true
+      });
+      n.onclick = function() { window.focus(); n.close(); };
+    } catch(e) {}
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission().then(function(p) {
+      if (p === 'granted') testFCMSoundAndNotification();
+    });
+  }
+  // 4) Toast
+  if (typeof toast === 'function') toast('تم تشغيل الصوت + الإشعار', 'ok');
+  console.log('[FCM TEST] انتهى');
+}
+
+
+
 /* ══════════════════ STORAGE ══════════════════ */
 var _memStore={};
 var _storageAvailable=(function(){try{localStorage.setItem('_test','1');localStorage.removeItem('_test');return true}catch(e){return false}})();
@@ -6789,42 +6860,54 @@ function setupFCMNotifications() {
     .catch(function(e) { console.warn('[FCM] Skipped:', e.message); });
 }
 
-// ══════════════════════════════════════════════════════════════
-// إشعار صوتي محلي عند وصول رسالة/طلب جديد
-// ══════════════════════════════════════════════════════════════
-function _fcmLocalAlert(title, body) {
-  // 1) صوت
-  try { playFCMNotificationSound(); } catch(e) {}
-  // 2) اهتزاز
-  if (navigator.vibrate) try { navigator.vibrate([200, 100, 200]); } catch(e) {}
-  // 3) إشعار نظام
-  if (Notification.permission === 'granted') {
-    try {
-      var n = new Notification(title, {
-        body: body, icon: '/icon-192.png', dir: 'rtl', lang: 'ar',
-        tag: 'local-' + Date.now(), silent: true, requireInteraction: false
-      });
-      n.onclick = function() { window.focus(); n.close(); };
-      setTimeout(function() { n.close(); }, 8000);
-    } catch(e) {}
-  }
-  // 4) Toast
-  if (typeof toast === 'function') toast(title + ': ' + body, 'ok');
+// ── دوال الإرسال (للأدمن) ──
+function getFCMTokensByRole(role) {
+  var q = '?select=fcm_token&is_active=eq.true';
+  if (role && role !== 'all') q += '&user_role=eq.' + role;
+  return supaFetch('fcm_tokens', 'GET', null, q).then(function(rows) {
+    return (rows || []).map(function(r) { return r.fcm_token; });
+  });
 }
 
-// ══════════════════════════════════════════════════════════════
-// زر اختبار الصوت والإشعار المحلي (بدون سيرفر)
-// ══════════════════════════════════════════════════════════════
-function testFCMSoundAndNotification() {
-  console.log('[FCM TEST] === بدء الاختبار ===');
+function sendNotificationToRole(role, title, body) {
+  return getFCMTokensByRole(role).then(function(tokens) {
+    if (!tokens.length) {
+      if (typeof toast === 'function') toast('لا يوجد مسجلون لهذا الدور', 'wa');
+      return { success: false };
+    }
+    return fetch(FCM_SEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tokens: tokens, title: title, body: body })
+    }).then(function(r) { return r.json(); })
+      .then(function(result) {
+        if (result.success && typeof toast === 'function')
+          toast('تم الإرسال (' + result.summary.sent + '/' + result.summary.total + ')', 'ok');
+        if (result.invalidTokens && result.invalidTokens.length)
+          result.invalidTokens.forEach(function(t) {
+            supaFetch('fcm_tokens', 'DELETE', null, '?fcm_token=eq.' + encodeURIComponent(t));
+          });
+        return result;
+      });
+  });
+}
 
-  // 1) تشغيل الصوت المدمج
-  console.log('[FCM TEST] Step 1: Playing sound...');
-  playFCMNotificationSound();
-
-  // 2) اهتزاز (موبايل)
-  if (navigator.vibrate) {
-    try { navigator.vibrate([300, 100, 300]); } catch(e) {}
-  }
-
-  // 3) إشعار م
+function sendNotificationToUser(email, title, body) {
+  return supaFetch('fcm_tokens', 'GET', null,
+    '?select=fcm_token&is_active=eq.true&user_email=eq.' + encodeURIComponent(email)
+  ).then(function(rows) {
+    var tokens = (rows || []).map(function(r) { return r.fcm_token; });
+    if (!tokens.length) {
+      if (typeof toast === 'function') toast('المستخدم غير مسجل للإشعارات', 'wa');
+      return { success: false };
+    }
+    return fetch(FCM_SEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tokens: tokens, title: title, body: body })
+    }).then(function(r) { return r.json(); });
+  });
+}
+</script>
+</body>
+</html>
