@@ -1,9 +1,7 @@
 // ══════════════════════════════════════════════════════════════
 // send-notification.js — دالة سيرفر لإرسال إشعارات FCM
 // ──────────────────────────────────────────────────────────────
-// مكان الملف:
-//   Vercel  → /api/send-notification.js
-//   Netlify → /netlify/functions/send-notification.js
+// مكان الملف:  /api/send-notification.js  (Vercel)
 //
 // متغير البيئة المطلوب:
 //   FIREBASE_SERVICE_ACCOUNT = محتوى ملف JSON كاملاً (نص)
@@ -49,46 +47,85 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // ── بناء الإشعار ──
-    // مهم: نرسل data-only (بدون حقل notification)
-    // هذا يُجبر Service Worker على الاشتغال في الخلفية
-    // لأن المتصفح يتجاهل SW عند وجود حقل notification
+    // ══════════════════════════════════════════════════════════
+    // رسالة هجينة: notification + data + webpush.notification
+    // ──────────────────────────────────────────────────────────
+    // notification → المتصفح يعرض الإشعار تلقائياً في الخلفية
+    // data        → بيانات إضافية للـ foreground handler و SW
+    // webpush.notification → تخصيص شكل الإشعار (اهتزاز، أيقونة، اتجاه)
+    // ══════════════════════════════════════════════════════════
+    const msgTag = 'fcm-' + Date.now();
+
     const message = {
-      // كل البيانات في data فقط — لا notification هنا
+      // الإشعار الأساسي — يظهر تلقائياً في الخلفية
+      notification: {
+        title: title,
+        body: body
+      },
+
+      // بيانات إضافية — تصل للـ foreground handler و SW
       data: Object.assign({
         title: title,
         body: body,
         sound: 'true',
-        icon: '/icon-192.png',
-        badge: '/badge-72.png',
         timestamp: Date.now().toString()
       }, data || {}),
 
-      // Android — أولوية عالية لإيقاظ الجهاز
-      android: {
-        priority: 'high',
-        ttl: 86400000
-      },
-
-      // iOS (APNS) — أولوية فورية
-      apns: {
-        headers: {
-          'apns-priority': '10',
-          'apns-push-type': 'background'
-        },
-        payload: {
-          aps: {
-            'content-available': 1,
-            sound: 'default'
-          }
-        }
-      },
-
-      // Web Push — أولوية عالية + TTL طويل
+      // ── تخصيص Web Push (المتصفحات) ──
       webpush: {
+        notification: {
+          title: title,
+          body: body,
+          icon: 'https://works12.vercel.app/icon-192.png',
+          badge: 'https://works12.vercel.app/badge-72.png',
+          dir: 'rtl',
+          lang: 'ar',
+          tag: msgTag,
+          renotify: true,
+          requireInteraction: true,
+          vibrate: [300, 100, 300, 100, 300],
+          actions: [
+            { action: 'open', title: 'فتح' },
+            { action: 'dismiss', title: 'إغلاق' }
+          ]
+        },
         headers: {
           Urgency: 'high',
           TTL: '86400'
+        },
+        fcmOptions: {
+          link: 'https://works12.vercel.app'
+        }
+      },
+
+      // ── Android — أولوية عالية ──
+      android: {
+        priority: 'high',
+        ttl: 86400000,
+        notification: {
+          title: title,
+          body: body,
+          icon: 'icon_192',
+          color: '#1a73e8',
+          sound: 'default',
+          defaultVibrateTimings: true,
+          defaultSound: true,
+          channelId: 'fcm_default_channel'
+        }
+      },
+
+      // ── iOS (APNS) ──
+      apns: {
+        headers: {
+          'apns-priority': '10',
+          'apns-push-type': 'alert'
+        },
+        payload: {
+          aps: {
+            alert: { title: title, body: body },
+            sound: 'default',
+            badge: 1
+          }
         }
       }
     };

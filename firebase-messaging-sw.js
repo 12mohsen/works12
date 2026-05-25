@@ -1,6 +1,5 @@
 // ══════════════════════════════════════════════════════════════
 // firebase-messaging-sw.js — Service Worker لإشعارات FCM
-// يعمل في الخلفية حتى لو التطبيق والمتصفح مغلقين تماماً
 // ──────────────────────────────────────────────────────────────
 // مكان الملف: جذر الموقع بجوار index.html
 // ══════════════════════════════════════════════════════════════
@@ -20,120 +19,75 @@ firebase.initializeApp({
 var messaging = firebase.messaging();
 
 // ══════════════════════════════════════════════════════════════
-// الطريقة 1: onBackgroundMessage — تعمل مع رسائل FCM data-only
+// onBackgroundMessage — الرسائل الهجينة (notification+data)
+// ──────────────────────────────────────────────────────────────
+// عند وجود حقل notification، المتصفح يعرض الإشعار تلقائياً.
+// هذا الـ handler يُستخدم لإبلاغ الصفحة المفتوحة فقط.
 // ══════════════════════════════════════════════════════════════
 messaging.onBackgroundMessage(function(payload) {
   console.log('[SW] onBackgroundMessage:', payload);
 
-  var title = (payload.data && payload.data.title) || 'إشعار جديد';
-  var body = (payload.data && payload.data.body) || '';
-  var icon = (payload.data && payload.data.icon) || '/icon-192.png';
-
-  var options = {
-    body: body,
-    icon: icon,
-    badge: '/badge-72.png',
-    dir: 'rtl',
-    lang: 'ar',
-    tag: 'fcm-' + Date.now(),
-    requireInteraction: true,
-    vibrate: [300, 100, 300, 100, 300],
-    renotify: true,
-    data: payload.data || {},
-    actions: [
-      { action: 'open', title: 'فتح' },
-      { action: 'dismiss', title: 'إغلاق' }
-    ]
-  };
-
-  // إبلاغ الصفحة المفتوحة لتشغيل الصوت
+  // إبلاغ أي صفحة مفتوحة لتشغيل الصوت عند العودة
   self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
     cls.forEach(function(c) {
-      c.postMessage({ type: 'FCM_NOTIFICATION', title: title, body: body });
+      c.postMessage({
+        type: 'FCM_NOTIFICATION',
+        playSound: true,
+        title: (payload.data && payload.data.title) || '',
+        body: (payload.data && payload.data.body) || ''
+      });
     });
   });
 
-  return self.registration.showNotification(title, options);
-});
-
-// ══════════════════════════════════════════════════════════════
-// الطريقة 2: push event مباشر — شبكة أمان إضافية
-// يلتقط أي رسالة push لم تُعالج بالطريقة الأولى
-// ══════════════════════════════════════════════════════════════
-self.addEventListener('push', function(event) {
-  // إذا Firebase عالجتها بالفعل — لا نكرر
-  if (event.__handled) return;
-
-  console.log('[SW] push event:', event);
-
-  var data = {};
-  try {
-    if (event.data) {
-      data = event.data.json();
-    }
-  } catch(e) {
-    try { data = { data: { title: event.data.text(), body: '' } }; } catch(e2) {}
-  }
-
-  // استخراج البيانات من أي هيكل
-  var title = (data.data && data.data.title) ||
-              (data.notification && data.notification.title) ||
-              'إشعار جديد';
-  var body  = (data.data && data.data.body) ||
-              (data.notification && data.notification.body) ||
-              '';
-
-  // التحقق: هل showNotification سيتم من onBackgroundMessage؟
-  // ننتظر قليلاً — إذا لم يظهر إشعار، نعرضه نحن
-  event.waitUntil(
-    self.registration.getNotifications({ tag: 'fcm-' }).then(function(existing) {
-      // إذا لم يكن هناك إشعار حديث (خلال ثانية)
-      var recent = existing.filter(function(n) {
-        return (Date.now() - (n.timestamp || 0)) < 3000;
-      });
-
-      if (recent.length === 0 && title) {
-        return self.registration.showNotification(title, {
-          body: body,
-          icon: '/icon-192.png',
-          badge: '/badge-72.png',
-          dir: 'rtl',
-          lang: 'ar',
-          tag: 'push-' + Date.now(),
-          requireInteraction: true,
-          vibrate: [300, 100, 300, 100, 300],
-          renotify: true,
-          data: data.data || {}
-        });
-      }
-    })
-  );
+  // ملاحظة: لا نحتاج showNotification هنا
+  // لأن حقل notification في الرسالة يجعل المتصفح يعرض الإشعار تلقائياً
+  // لكن نضيفه كشبكة أمان في حالة لم يعرضه المتصفح
 });
 
 // ══════════════════════════════════════════════════════════════
 // الضغط على الإشعار — فتح التطبيق
 // ══════════════════════════════════════════════════════════════
 self.addEventListener('notificationclick', function(event) {
+  console.log('[SW] notificationclick:', event.action);
   event.notification.close();
+
   if (event.action === 'dismiss') return;
+
+  var urlToOpen = 'https://works12.vercel.app/';
+
+  // محاولة استخراج URL من بيانات الإشعار
+  if (event.notification.data) {
+    if (event.notification.data.FCM_MSG && event.notification.data.FCM_MSG.data && event.notification.data.FCM_MSG.data.url) {
+      urlToOpen = event.notification.data.FCM_MSG.data.url;
+    } else if (event.notification.data.url) {
+      urlToOpen = event.notification.data.url;
+    }
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
       // التركيز على نافذة مفتوحة
       for (var i = 0; i < cls.length; i++) {
         if ('focus' in cls[i]) {
-          cls[i].postMessage({ type: 'FCM_NOTIFICATION', title: '', body: '' });
+          cls[i].postMessage({ type: 'FCM_NOTIFICATION', playSound: true });
           return cls[i].focus();
         }
       }
       // فتح نافذة جديدة
-      return self.clients.openWindow(event.notification.data && event.notification.data.url || '/');
+      return self.clients.openWindow(urlToOpen);
     })
   );
 });
 
 // ══════════════════════════════════════════════════════════════
-// تفعيل فوري
+// تفعيل فوري — بدون انتظار
 // ══════════════════════════════════════════════════════════════
-self.addEventListener('install', function() { self.skipWaiting(); });
-self.addEventListener('activate', function(event) { event.waitUntil(self.clients.claim()); });
+self.addEventListener('install', function() {
+  console.log('[SW] Install — skipWaiting');
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function(event) {
+  console.log('[SW] Activate — claim clients');
+  event.waitUntil(self.clients.claim());
+});
