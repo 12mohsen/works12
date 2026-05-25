@@ -1,15 +1,13 @@
 // ══════════════════════════════════════════════════════════════
-// firebase-messaging-sw.js
-// Service Worker لاستقبال إشعارات FCM في الخلفية
+// firebase-messaging-sw.js — Service Worker لإشعارات FCM
+// يعمل في الخلفية حتى لو التطبيق والمتصفح مغلقين تماماً
 // ──────────────────────────────────────────────────────────────
-// مكان الملف: الجذر (root) لموقعك — بجوار index.html مباشرة
-//   يجب أن يكون الرابط: https://yoursite.com/firebase-messaging-sw.js
+// مكان الملف: جذر الموقع بجوار index.html
 // ══════════════════════════════════════════════════════════════
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
-// ── إعدادات مشروعك على Firebase ──
 firebase.initializeApp({
   apiKey: "AIzaSyAleLvowSo5FDhkQesi_yYOEMXW-pPQMnY",
   authDomain: "works12.firebaseapp.com",
@@ -19,60 +17,123 @@ firebase.initializeApp({
   appId: "1:522854999112:web:e3282c6906f6d23384247d"
 });
 
-const messaging = firebase.messaging();
+var messaging = firebase.messaging();
 
 // ══════════════════════════════════════════════════════════════
-// استقبال الإشعارات في الخلفية (التطبيق/المتصفح مغلق أو في الخلفية)
+// الطريقة 1: onBackgroundMessage — تعمل مع رسائل FCM data-only
 // ══════════════════════════════════════════════════════════════
 messaging.onBackgroundMessage(function(payload) {
-  console.log('[SW] إشعار خلفية:', payload);
+  console.log('[SW] onBackgroundMessage:', payload);
 
-  var notificationTitle = payload.notification?.title || 'إشعار جديد';
-  var notificationOptions = {
-    body: payload.notification?.body || '',
-    icon: payload.data?.icon || '/icon-192.png',
+  var title = (payload.data && payload.data.title) || 'إشعار جديد';
+  var body = (payload.data && payload.data.body) || '';
+  var icon = (payload.data && payload.data.icon) || '/icon-192.png';
+
+  var options = {
+    body: body,
+    icon: icon,
     badge: '/badge-72.png',
     dir: 'rtl',
     lang: 'ar',
-    tag: 'notif-' + Date.now(),
+    tag: 'fcm-' + Date.now(),
     requireInteraction: true,
-    vibrate: [200, 100, 200],
+    vibrate: [300, 100, 300, 100, 300],
+    renotify: true,
     data: payload.data || {},
     actions: [
-      { action: 'open', title: 'فتح التطبيق' },
-      { action: 'close', title: 'إغلاق' }
+      { action: 'open', title: 'فتح' },
+      { action: 'dismiss', title: 'إغلاق' }
     ]
   };
 
-  // إبلاغ الصفحة المفتوحة (إن وجدت) لتشغيل الصوت
-  clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
-    cls.forEach(function(client) {
-      client.postMessage({ type: 'FCM_NOTIFICATION', title: notificationTitle, body: notificationOptions.body });
+  // إبلاغ الصفحة المفتوحة لتشغيل الصوت
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
+    cls.forEach(function(c) {
+      c.postMessage({ type: 'FCM_NOTIFICATION', title: title, body: body });
     });
   });
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(title, options);
 });
 
 // ══════════════════════════════════════════════════════════════
-// الضغط على الإشعار — فتح التطبيق أو التركيز عليه
+// الطريقة 2: push event مباشر — شبكة أمان إضافية
+// يلتقط أي رسالة push لم تُعالج بالطريقة الأولى
 // ══════════════════════════════════════════════════════════════
-self.addEventListener('notificationclick', function(event) {
-  event.notification.close();
-  if (event.action === 'close') return;
+self.addEventListener('push', function(event) {
+  // إذا Firebase عالجتها بالفعل — لا نكرر
+  if (event.__handled) return;
 
+  console.log('[SW] push event:', event);
+
+  var data = {};
+  try {
+    if (event.data) {
+      data = event.data.json();
+    }
+  } catch(e) {
+    try { data = { data: { title: event.data.text(), body: '' } }; } catch(e2) {}
+  }
+
+  // استخراج البيانات من أي هيكل
+  var title = (data.data && data.data.title) ||
+              (data.notification && data.notification.title) ||
+              'إشعار جديد';
+  var body  = (data.data && data.data.body) ||
+              (data.notification && data.notification.body) ||
+              '';
+
+  // التحقق: هل showNotification سيتم من onBackgroundMessage؟
+  // ننتظر قليلاً — إذا لم يظهر إشعار، نعرضه نحن
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
-      for (var i = 0; i < windowClients.length; i++) {
-        if ('focus' in windowClients[i]) return windowClients[i].focus();
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(event.notification.data?.url || '/');
+    self.registration.getNotifications({ tag: 'fcm-' }).then(function(existing) {
+      // إذا لم يكن هناك إشعار حديث (خلال ثانية)
+      var recent = existing.filter(function(n) {
+        return (Date.now() - (n.timestamp || 0)) < 3000;
+      });
+
+      if (recent.length === 0 && title) {
+        return self.registration.showNotification(title, {
+          body: body,
+          icon: '/icon-192.png',
+          badge: '/badge-72.png',
+          dir: 'rtl',
+          lang: 'ar',
+          tag: 'push-' + Date.now(),
+          requireInteraction: true,
+          vibrate: [300, 100, 300, 100, 300],
+          renotify: true,
+          data: data.data || {}
+        });
       }
     })
   );
 });
 
-// ── تفعيل فوري ──
+// ══════════════════════════════════════════════════════════════
+// الضغط على الإشعار — فتح التطبيق
+// ══════════════════════════════════════════════════════════════
+self.addEventListener('notificationclick', function(event) {
+  event.notification.close();
+  if (event.action === 'dismiss') return;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(cls) {
+      // التركيز على نافذة مفتوحة
+      for (var i = 0; i < cls.length; i++) {
+        if ('focus' in cls[i]) {
+          cls[i].postMessage({ type: 'FCM_NOTIFICATION', title: '', body: '' });
+          return cls[i].focus();
+        }
+      }
+      // فتح نافذة جديدة
+      return self.clients.openWindow(event.notification.data && event.notification.data.url || '/');
+    })
+  );
+});
+
+// ══════════════════════════════════════════════════════════════
+// تفعيل فوري
+// ══════════════════════════════════════════════════════════════
 self.addEventListener('install', function() { self.skipWaiting(); });
-self.addEventListener('activate', function(event) { event.waitUntil(clients.claim()); });
+self.addEventListener('activate', function(event) { event.waitUntil(self.clients.claim()); });

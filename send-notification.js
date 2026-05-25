@@ -49,46 +49,47 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // ── بناء الإشعار مع الصوت لكل المنصات ──
+    // ── بناء الإشعار ──
+    // مهم: نرسل data-only (بدون حقل notification)
+    // هذا يُجبر Service Worker على الاشتغال في الخلفية
+    // لأن المتصفح يتجاهل SW عند وجود حقل notification
     const message = {
-      notification: { title, body },
-      data: Object.assign({ sound: 'true', playSound: 'true' }, data || {}),
+      // كل البيانات في data فقط — لا notification هنا
+      data: Object.assign({
+        title: title,
+        body: body,
+        sound: 'true',
+        icon: '/icon-192.png',
+        badge: '/badge-72.png',
+        timestamp: Date.now().toString()
+      }, data || {}),
 
-      // Android — صوت افتراضي + أولوية عالية
+      // Android — أولوية عالية لإيقاظ الجهاز
       android: {
         priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'high_importance_channel',
-          defaultSound: true,
-          notificationPriority: 'PRIORITY_MAX',
-          visibility: 'PUBLIC'
-        }
+        ttl: 86400000
       },
 
-      // iOS (APNS) — صوت افتراضي + أولوية فورية
+      // iOS (APNS) — أولوية فورية
       apns: {
-        headers: { 'apns-priority': '10' },
+        headers: {
+          'apns-priority': '10',
+          'apns-push-type': 'background'
+        },
         payload: {
           aps: {
-            sound: 'default',
-            badge: 1,
-            'content-available': 1
+            'content-available': 1,
+            sound: 'default'
           }
         }
       },
 
-      // Web Push — أولوية عالية
+      // Web Push — أولوية عالية + TTL طويل
       webpush: {
-        headers: { Urgency: 'high', TTL: '86400' },
-        notification: {
-          icon: '/icon-192.png',
-          badge: '/badge-72.png',
-          requireInteraction: true,
-          dir: 'rtl',
-          silent: false
-        },
-        fcmOptions: { link: '/' }
+        headers: {
+          Urgency: 'high',
+          TTL: '86400'
+        }
       }
     };
 
