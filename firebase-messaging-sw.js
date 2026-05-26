@@ -17,13 +17,23 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey:            "YOUR_FIREBASE_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId:             "YOUR_FIREBASE_APP_ID"
-});
+  apiKey:            "// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAleLvowSo5FDhkQesi_yYOEMXW-pPQMnY",
+  authDomain: "works12.firebaseapp.com",
+  projectId: "works12",
+  storageBucket: "works12.firebasestorage.app",
+  messagingSenderId: "522854999112",
+  appId: "1:522854999112:web:e3282c6906f6d23384247d"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
