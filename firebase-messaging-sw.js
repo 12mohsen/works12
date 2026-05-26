@@ -4,14 +4,13 @@
    ⚠️ يجب رفعه إلى **جذر النطاق** بالضبط بهذا الاسم:
        https://yourdomain.com/firebase-messaging-sw.js
 
-   🎯 يعتمد كلياً على onBackgroundMessage مع رسالة data-only
+   🎯 يعتمد كلياً على onBackgroundMessage مع رسالة data-only من السيرفر
        (لا push listener يدوي — تجنّباً لتكرار الإشعار).
 
-   🔐 هذه القيم Placeholders آمنة للرفع على GitHub العام.
-       استبدلها يدوياً بمفاتيح Firebase الخاصة بمشروعك
-       (Firebase Console → Project Settings → General → Your apps).
-       جميع هذه القيم خاصة بالـ Frontend وآمنة كشفها — لا تحتوي
-       على أي مفتاح خادم سري.
+   🔐 القيم أدناه Placeholders آمنة للرفع على GitHub العام.
+       استبدلها بمفاتيح مشروعك من:
+       Firebase Console → Project Settings → General → Your apps.
+       (مفاتيح Firebase Web client آمنة في الواجهة — ليست أسراراً).
    ════════════════════════════════════════════════════════════════ */
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
@@ -30,14 +29,28 @@ const messaging = firebase.messaging();
 
 /* ────────────────────────────────────────────────────────────────
    onBackgroundMessage — يُستدعى حصراً عندما يكون التطبيق مغلقاً
-   أو في تبويب غير مرئي. لأن السيرفر يرسل data-only
-   (بدون payload.notification الجذري) فالمتصفح لا يعرض شيئاً
-   تلقائياً — Service Worker مسؤول عن عرض الإشعار بنفسه.
+   أو في تبويب غير مرئي. لأن السيرفر يرسل data-only فالمتصفح لا
+   يعرض شيئاً تلقائياً — Service Worker مسؤول عن كل الإعدادات.
+
+   ✅ المعالجة هنا تَفرِض على المتصفح:
+        • silent: false              → تشغيل الصوت الافتراضي للنظام
+        • renotify: true             → إعادة التنبيه حتى لو نفس الـ tag
+        • requireInteraction: true   → الإشعار لا يختفي حتى يضغط الآدمن
+        • vibrate: نمط ثابت          → اهتزاز على الجوال
+        • tag فريد لكل رسالة          → ضمان عدم اندماج الرسائل
    ──────────────────────────────────────────────────────────────── */
 messaging.onBackgroundMessage(function(payload){
   console.log('[FCM SW] background payload:', payload);
 
   const d = payload.data || {};
+
+  // تمييز رسائل الآدمن (يأتي من السيرفر بـ priority=high)
+  const isAdmin = d.priority === 'high' ||
+                  d.requireInteraction === 'true' ||
+                  d.requireInteraction === true;
+
+  // 🔁 tag فريد لكل رسالة جديدة كي يُعاد التنبيه (لا يندمج صامتاً)
+  const uniqueTag = d.tag || ('msg-' + Date.now());
 
   const title = d.title || 'سوق الأعمال المرخّص';
   const options = {
@@ -45,17 +58,21 @@ messaging.onBackgroundMessage(function(payload){
     icon:               d.icon  || '/icon-192.png',
     badge:              d.badge || '/icon-192.png',
     image:              d.image || undefined,
-    tag:                d.tag   || 'general',
-    renotify:           true,
-    requireInteraction: d.requireInteraction === 'true' || d.requireInteraction === true,
-    silent:             false,                              // اعتمد صوت الجوال الافتراضي
-    vibrate:            [200, 100, 200, 100, 200],          // اهتزاز ثابت لكل الإشعارات
+    tag:                uniqueTag,
+
+    // ⚡ الإعدادات المهمة لحل مشكلة "الإشعار يصل بدون صوت":
+    silent:             false,                          // ⭐ تشغيل صوت النظام الافتراضي
+    renotify:           true,                           // ⭐ إعادة التنبيه مع كل رسالة
+    requireInteraction: true,                           // ⭐ يبقى الإشعار حتى يضغط الآدمن
+    vibrate:            [300, 150, 300, 150, 300, 150, 300], // اهتزاز طويل ومميز
     timestamp:          Date.now(),
     dir:                'rtl',
     lang:               'ar',
+
     data: {
-      url:  d.url || '/',
-      tag:  d.tag || 'general',
+      url:    d.url || '/',
+      tag:    uniqueTag,
+      isAdmin: isAdmin,
       ...d
     },
     actions: [
@@ -64,11 +81,25 @@ messaging.onBackgroundMessage(function(payload){
     ]
   };
 
+  // إخبار كل التابات المفتوحة (لو وُجد بعضها) لتشغيل صوت داخلي إضافي
+  // — مفيد إذا كان الآدمن لديه تاب مفتوح خفي على جهاز ثانٍ.
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then(function(clients){
+      clients.forEach(function(c){
+        try {
+          c.postMessage({
+            type: 'fcm-background-message',
+            payload: { title: title, body: d.body || '', data: d, isAdmin: isAdmin }
+          });
+        } catch(e) {}
+      });
+    });
+
   return self.registration.showNotification(title, options);
 });
 
 /* ────────────────────────────────────────────────────────────────
-   عند نقر المستخدم على الإشعار في ستارة الجوال:
+   عند نقر المستخدم على الإشعار:
    - إذا التطبيق مفتوح في تاب → ركّز عليه
    - إذا التطبيق مغلق → افتحه على الـ URL المخصّص
    ──────────────────────────────────────────────────────────────── */
@@ -84,7 +115,13 @@ self.addEventListener('notificationclick', function(event){
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
         if (client.url.indexOf(self.location.origin) !== -1) {
-          try { client.postMessage({ type: 'fcm-notification-click', url: targetUrl, data: data }); } catch(e) {}
+          try {
+            client.postMessage({
+              type: 'fcm-notification-click',
+              url:  targetUrl,
+              data: data
+            });
+          } catch(e) {}
           if ('focus' in client) return client.focus();
         }
       }
@@ -94,8 +131,8 @@ self.addEventListener('notificationclick', function(event){
 });
 
 /* ⚠️ لا نضيف self.addEventListener('push', ...) — Firebase Messaging
-   compat يلتقطه داخلياً ويحوّله إلى onBackgroundMessage. إضافة push
-   listener يدوي تسبّب تكرار الإشعار. */
+   compat يلتقطه داخلياً ويحوّله إلى onBackgroundMessage.
+   إضافة push listener يدوي تسبّب تكرار الإشعار. */
 
 // تثبيت فوري + السيطرة على جميع التابات بدون إعادة تحميل
 self.addEventListener('install',  ()      => self.skipWaiting());

@@ -2780,9 +2780,28 @@ function initFCM(){
       var d = payload.data || {};
       var title = d.title || 'إشعار جديد';
       var body  = d.body  || '';
-      // 1) toast مرئي داخل التطبيق + صوت Web Audio
-      toast(title + (body ? ' — ' + body : ''), 'ok');
-      // 2) إشعار نظام أيضاً عبر Service Worker (يعمل بالصوت الافتراضي للجوال)
+      // ⚡ هل المرسل إليه آدمن؟ (السيرفر يمرر priority=high + requireInteraction=true)
+      var isAdmin = (d.priority === 'high')
+                 || (d.requireInteraction === 'true' || d.requireInteraction === true)
+                 || (currentUser && currentUser.role === 'admin');
+      // 🔁 tag فريد لكل رسالة (مهم مع renotify لئلا تندمج الرسائل)
+      var uniqueTag = d.tag || ('msg-' + Date.now());
+
+      // 1) toast مرئي داخل التطبيق + صوت Web Audio (نُلغي الـ gate لرسائل الآدمن)
+      try {
+        if (isAdmin) window._notifSoundEnabled = true; // ⭐ إجبار الصوت للآدمن
+        toast(title + (body ? ' — ' + body : ''), 'ok');
+        if (isAdmin && typeof playToastSound === 'function') {
+          playToastSound('ok');
+          setTimeout(function(){ try{ playToastSound('warn'); }catch(_){} }, 250);
+          setTimeout(function(){ try{ playToastSound('ok');   }catch(_){} }, 500);
+        }
+      } catch(_){}
+
+      // 2) اهتزاز يدوي على الجوال
+      try { if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 300]); } catch(_){}
+
+      // 3) إشعار نظام عبر Service Worker — مع صوت وثبات حتى الضغط
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
           if (navigator.serviceWorker && navigator.serviceWorker.ready) {
@@ -2791,12 +2810,18 @@ function initFCM(){
                 body: body,
                 icon: d.icon || '/icon-192.png',
                 badge: d.badge || '/icon-192.png',
-                tag: d.tag || 'general',
-                renotify: true,
-                requireInteraction: d.requireInteraction === 'true' || d.requireInteraction === true,
-                silent: false,
-                vibrate: [200, 100, 200, 100, 200],
-                data: { url: d.url || '/', ...d },
+                tag: uniqueTag,
+                // ⚡ إصلاح "الإشعار يصل بدون صوت/منبثق":
+                silent:             false,                                  // ⭐ صوت النظام
+                renotify:           true,                                   // ⭐ يُنبّه دائماً
+                requireInteraction: isAdmin ? true                          // ⭐ لا يختفي
+                                            : (d.requireInteraction === 'true' || d.requireInteraction === true),
+                vibrate: isAdmin ? [300, 150, 300, 150, 300, 150, 300]
+                                 : [200, 100, 200, 100, 200],
+                timestamp: Date.now(),
+                dir: 'rtl',
+                lang: 'ar',
+                data: { url: d.url || '/', isAdmin: isAdmin, ...d },
                 actions: [
                   { action: 'open', title: '📂 فتح' },
                   { action: 'close', title: '✖ إغلاق' }
@@ -2804,11 +2829,32 @@ function initFCM(){
               });
             });
           } else {
-            new Notification(title, { body: body, icon: '/icon-192.png', tag: d.tag || 'general' });
+            new Notification(title, {
+              body: body,
+              icon: '/icon-192.png',
+              tag: uniqueTag,
+              silent: false,
+              requireInteraction: isAdmin
+            });
           }
         } catch(e) { console.warn('[FCM] showNotification failed:', e); }
       }
     });
+
+    // 🔔 استقبال رسائل من Service Worker (لإيقاظ صوت إضافي في الفرونت)
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.addEventListener('message', function(evt){
+        var msg = evt && evt.data;
+        if (!msg) return;
+        if (msg.type === 'fcm-background-message') {
+          try {
+            window._notifSoundEnabled = true;
+            if (typeof playToastSound === 'function') playToastSound('ok');
+            if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+          } catch(_){}
+        }
+      });
+    }
     // تسجيل الـ Service Worker
     if('serviceWorker' in navigator){
       navigator.serviceWorker.register('/firebase-messaging-sw.js').then(function(reg){
