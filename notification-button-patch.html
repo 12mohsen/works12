@@ -1,0 +1,253 @@
+<!-- ════════════════════════════════════════════════════════════════
+     🩹 Notification Button Patch — works12
+     ضع هذا الكود بالكامل **قبل </body>** مباشرة في index.html
+     يحل المشاكل التالية تلقائياً:
+       1. restoreSession() لا يستدعي registerFCMToken (المشكلة الجذرية)
+       2. إذا رفض المستخدم الإذن مرة، لا تتم محاولة جديدة (لا توجد UI لإعادة المحاولة)
+       3. لا توجد طريقة بصرية لمعرفة هل الإشعارات مفعّلة أم لا
+     ════════════════════════════════════════════════════════════════ -->
+
+<style>
+  #fcm-bell-btn{
+    position:fixed; bottom:80px; left:16px; z-index:99999;
+    background:linear-gradient(135deg,#dc2626,#b91c1c);
+    color:#fff; border:0; border-radius:50%;
+    width:60px; height:60px; font-size:28px;
+    box-shadow:0 8px 24px rgba(220,38,38,0.5), 0 0 0 4px rgba(220,38,38,0.2);
+    cursor:pointer; display:none;
+    animation:fcm-pulse 2s ease-in-out infinite;
+  }
+  #fcm-bell-btn.ok{
+    background:linear-gradient(135deg,#16a34a,#15803d);
+    box-shadow:0 8px 24px rgba(22,163,74,0.4);
+    animation:none;
+  }
+  @keyframes fcm-pulse{
+    0%,100%{transform:scale(1)}
+    50%{transform:scale(1.1)}
+  }
+  #fcm-bell-btn:hover{transform:scale(1.15)}
+  #fcm-status-panel{
+    position:fixed; bottom:150px; left:16px; z-index:99998;
+    background:#0b1220; color:#e6eaf2; border:2px solid #233055;
+    border-radius:12px; padding:14px; max-width:320px; display:none;
+    font-family:Tajawal,system-ui,Arial; font-size:13px; line-height:1.6;
+    box-shadow:0 12px 32px rgba(0,0,0,0.4);
+  }
+  #fcm-status-panel h3{color:#facc15;margin:0 0 8px;font-size:14px}
+  #fcm-status-panel .step{padding:4px 0;border-bottom:1px dashed #2a3552}
+  #fcm-status-panel .step:last-child{border:0}
+  #fcm-status-panel .ok{color:#22c55e}
+  #fcm-status-panel .bad{color:#ef4444}
+  #fcm-status-panel .warn{color:#f59e0b}
+  #fcm-status-panel button{
+    background:#2563eb;color:#fff;border:0;padding:6px 12px;border-radius:6px;
+    cursor:pointer;margin-top:8px;font-size:12px
+  }
+</style>
+
+<button id="fcm-bell-btn" onclick="fcmBellClick()" title="تفعيل الإشعارات">🔔</button>
+<div id="fcm-status-panel"></div>
+
+<script>
+(function(){
+  'use strict';
+
+  // ─── تأكد من توفر الدوال الأصلية في الكود ───
+  function ready(){
+    return typeof initFCM === 'function'
+        && typeof registerFCMToken === 'function'
+        && typeof requestNotificationPermission === 'function';
+  }
+
+  function $(id){ return document.getElementById(id); }
+
+  // ─── تحديث مظهر الزر حسب الحالة ───
+  function updateBellUI(){
+    var btn = $('fcm-bell-btn');
+    if (!btn) return;
+    var perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+
+    if (perm === 'granted' && window._fcmToken) {
+      btn.classList.add('ok');
+      btn.innerHTML = '✅';
+      btn.title = 'الإشعارات مفعّلة';
+      // إخفاء بعد 3 ثواني
+      setTimeout(function(){ btn.style.display = 'none'; }, 3000);
+    } else if (perm === 'denied') {
+      btn.classList.remove('ok');
+      btn.innerHTML = '🚫';
+      btn.title = 'الإشعارات محظورة — اضغط للتعليمات';
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+    } else {
+      btn.classList.remove('ok');
+      btn.innerHTML = '🔔';
+      btn.title = 'تفعيل الإشعارات';
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+    }
+  }
+
+  // ─── لوحة حالة مرئية ───
+  function showPanel(html){
+    var p = $('fcm-status-panel');
+    p.innerHTML = html + '<button onclick="document.getElementById(\'fcm-status-panel\').style.display=\'none\'">إغلاق</button>';
+    p.style.display = 'block';
+  }
+
+  // ─── ضغطة الزر ───
+  window.fcmBellClick = async function(){
+    if (!('Notification' in window)) {
+      showPanel('<h3>❌ غير مدعوم</h3><div>المتصفح لا يدعم الإشعارات.</div>');
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      showPanel(
+        '<h3>🚫 الإشعارات محظورة</h3>' +
+        '<div class="step bad">تم رفض الإذن سابقاً.</div>' +
+        '<div class="step">لتفعيلها:</div>' +
+        '<div class="step">1. اضغط على القفل 🔒 بجانب رابط الموقع</div>' +
+        '<div class="step">2. اختر <b>إعدادات الموقع</b></div>' +
+        '<div class="step">3. غيّر "الإشعارات" إلى <b>السماح</b></div>' +
+        '<div class="step">4. أعد تحميل الصفحة</div>'
+      );
+      return;
+    }
+
+    showPanel('<h3>⏳ جارٍ التفعيل...</h3>');
+
+    try {
+      // 1) تهيئة Firebase
+      if (typeof initFCM === 'function') initFCM();
+      var initOK = !!window._fcmMessaging;
+      showPanel(
+        '<h3>📋 الحالة</h3>' +
+        '<div class="step ' + (initOK ? 'ok' : 'bad') + '">Firebase: ' + (initOK ? '✅' : '❌ غير مهيأ') + '</div>' +
+        '<div class="step warn">⏳ طلب الإذن...</div>'
+      );
+
+      if (!initOK) {
+        showPanel(
+          '<h3>❌ خطأ</h3>' +
+          '<div class="step bad">Firebase لم يُهيّأ. تحقق أن FCM_CONFIG في index.html يحتوي القيم الحقيقية (وليس YOUR_...)</div>'
+        );
+        return;
+      }
+
+      // 2) طلب الإذن صراحة
+      var perm = await Notification.requestPermission();
+
+      if (perm !== 'granted') {
+        showPanel(
+          '<h3>⚠️ لم يُمنح الإذن</h3>' +
+          '<div class="step bad">حالة الإذن: ' + perm + '</div>' +
+          '<div class="step">اضغط الزر مرة أخرى وامنح الإذن.</div>'
+        );
+        updateBellUI();
+        return;
+      }
+
+      // 3) تسجيل التوكن
+      if (!window.currentUser) {
+        showPanel(
+          '<h3>⚠️ لم تسجل دخولك</h3>' +
+          '<div class="step warn">امنحنا الإذن ✅</div>' +
+          '<div class="step bad">لكن يجب تسجيل الدخول أولاً لحفظ توكن الإشعار في قاعدة البيانات.</div>'
+        );
+        return;
+      }
+
+      if (typeof registerFCMToken === 'function') {
+        await registerFCMToken();
+      }
+
+      if (window._fcmToken) {
+        showPanel(
+          '<h3>✅ تم التفعيل بنجاح</h3>' +
+          '<div class="step ok">Firebase ✅</div>' +
+          '<div class="step ok">الإذن: ممنوح ✅</div>' +
+          '<div class="step ok">التوكن: ' + window._fcmToken.slice(0,20) + '... ✅</div>' +
+          '<div class="step ok">مُسجَّل في قاعدة البيانات ✅</div>' +
+          '<div class="step">يمكنك الآن استقبال الإشعارات</div>'
+        );
+      } else {
+        showPanel(
+          '<h3>⚠️ خطأ في توليد التوكن</h3>' +
+          '<div class="step bad">تأكد من VAPID Key في FCM_VAPID_KEY (ليس YOUR_VAPID_PUBLIC_KEY)</div>' +
+          '<div class="step bad">تأكد أن firebase-messaging-sw.js يفتح بدون 404 على /firebase-messaging-sw.js</div>'
+        );
+      }
+
+      updateBellUI();
+    } catch(e) {
+      showPanel(
+        '<h3>❌ خطأ</h3>' +
+        '<div class="step bad">' + (e.message || e) + '</div>'
+      );
+      console.error('[fcm-bell] error:', e);
+    }
+  };
+
+  // ─── ترقيع restoreSession لإعادة محاولة تسجيل التوكن ───
+  function patchRestoreSession(){
+    if (typeof restoreSession !== 'function') return;
+    if (restoreSession._fcmPatched) return;
+    var orig = restoreSession;
+    window.restoreSession = function(){
+      var result = orig.apply(this, arguments);
+      // إذا تم استرجاع الجلسة بنجاح، حاول تسجيل التوكن
+      if (result && window.currentUser) {
+        setTimeout(function(){
+          if (typeof registerFCMToken === 'function') {
+            console.log('[fcm-patch] تسجيل التوكن بعد استعادة الجلسة');
+            registerFCMToken().then(updateBellUI).catch(function(e){
+              console.warn('[fcm-patch] فشل تسجيل التوكن:', e);
+              updateBellUI();
+            });
+          }
+        }, 500);
+      }
+      return result;
+    };
+    window.restoreSession._fcmPatched = true;
+    console.log('[fcm-patch] restoreSession تم ترقيعه ✅');
+  }
+
+  // ─── بدء التشغيل ───
+  function start(){
+    if (!ready()) {
+      // إذا الدوال الأصلية ليست جاهزة بعد، انتظر
+      setTimeout(start, 300);
+      return;
+    }
+
+    patchRestoreSession();
+    updateBellUI();
+
+    // إذا كان مسجل دخول وغير ممنوح الإذن، نُظهر الزر
+    setTimeout(function(){
+      var btn = $('fcm-bell-btn');
+      if (Notification.permission !== 'granted' || !window._fcmToken) {
+        btn.style.display = 'flex';
+        btn.style.alignItems = 'center';
+        btn.style.justifyContent = 'center';
+      }
+    }, 1500);
+
+    // فحص دوري للحالة (لو تغيرت)
+    setInterval(updateBellUI, 5000);
+
+    console.log('[fcm-patch] تم تحميل patch الإشعارات ✅');
+  }
+
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start);
+})();
+</script>
+<!-- ════════════════════════════════════════════════════════════════
+     نهاية patch الإشعارات
+     ════════════════════════════════════════════════════════════════ -->

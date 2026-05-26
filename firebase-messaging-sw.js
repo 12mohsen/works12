@@ -1,39 +1,31 @@
 /* ════════════════════════════════════════════════════════════════
-   firebase-messaging-sw.js
+   firebase-messaging-sw.js — works12
    Service Worker لاستقبال إشعارات FCM في الخلفية
-   ⚠️ يجب رفعه إلى **جذر النطاق** بالضبط بهذا الاسم:
-       https://yourdomain.com/firebase-messaging-sw.js
+
+   ⚠️ موضع الملف: يجب أن يكون في **جذر النطاق** بالضبط:
+       https://works12.netlify.app/firebase-messaging-sw.js
+
+   🔐 ملاحظة أمنية:
+      القيم أدناه (apiKey, projectId, ...) هي إعدادات Firebase Web Client
+      وهي **آمنة للكشف العلني** — Firebase تصرّح بنشرها (مقيّدة عبر
+      HTTP Referrer والـ Security Rules). السر الحقيقي هو
+      service-account.json (المحفوظ في متغيرات Netlify فقط).
 
    🎯 يعتمد كلياً على onBackgroundMessage مع رسالة data-only من السيرفر
        (لا push listener يدوي — تجنّباً لتكرار الإشعار).
-
-   🔐 القيم أدناه Placeholders آمنة للرفع على GitHub العام.
-       استبدلها بمفاتيح مشروعك من:
-       Firebase Console → Project Settings → General → Your apps.
-       (مفاتيح Firebase Web client آمنة في الواجهة — ليست أسراراً).
    ════════════════════════════════════════════════════════════════ */
 
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey:            "// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyAleLvowSo5FDhkQesi_yYOEMXW-pPQMnY",
-  authDomain: "works12.firebaseapp.com",
-  projectId: "works12",
-  storageBucket: "works12.firebasestorage.app",
+  apiKey:            "AIzaSyAleLvowSo5FDhkQesi_yYOEMXW-pPQMnY",
+  authDomain:        "works12.firebaseapp.com",
+  projectId:         "works12",
+  storageBucket:     "works12.firebasestorage.app",
   messagingSenderId: "522854999112",
-  appId: "1:522854999112:web:e3282c6906f6d23384247d"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+  appId:             "1:522854999112:web:e3282c6906f6d23384247d"
+});
 
 const messaging = firebase.messaging();
 
@@ -80,8 +72,8 @@ messaging.onBackgroundMessage(function(payload){
     lang:               'ar',
 
     data: {
-      url:    d.url || '/',
-      tag:    uniqueTag,
+      url:     d.url || '/',
+      tag:     uniqueTag,
       isAdmin: isAdmin,
       ...d
     },
@@ -91,8 +83,7 @@ messaging.onBackgroundMessage(function(payload){
     ]
   };
 
-  // إخبار كل التابات المفتوحة (لو وُجد بعضها) لتشغيل صوت داخلي إضافي
-  // — مفيد إذا كان الآدمن لديه تاب مفتوح خفي على جهاز ثانٍ.
+  // إخبار كل التابات المفتوحة لتشغيل صوت داخلي إضافي
   self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then(function(clients){
       clients.forEach(function(c){
