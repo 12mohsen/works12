@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>🩺 أداة فحص works12 — Diagnostic</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,sans-serif;background:#0f1419;color:#e7e9ea;margin:0;min-height:100vh;padding:20px}
+  .wrap{max-width:760px;margin:0 auto;background:#16181c;border:1px solid #2f3336;border-radius:16px;padding:32px}
+  h1{color:#f4d35e;margin:0 0 8px}
+  .sub{color:#71767b;font-size:14px;margin-bottom:24px}
+  .field{margin:14px 0}
+  label{display:block;color:#a9b1b9;font-size:13px;margin-bottom:6px}
+  input{width:100%;padding:12px;background:#000;border:1px solid #2f3336;border-radius:8px;color:#e7e9ea;font-size:14px;font-family:inherit;direction:ltr;text-align:left;box-sizing:border-box}
+  input:focus{outline:none;border-color:#f4d35e}
+  .btn{display:block;width:100%;padding:14px;background:linear-gradient(135deg,#f4d35e,#ee964b);color:#0f1419;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-top:16px}
+  .btn:hover{filter:brightness(1.1)}
+  .results{margin-top:24px;background:#000;border-radius:10px;padding:18px;font-family:'SF Mono',Monaco,monospace;font-size:13px;line-height:1.9;max-height:560px;overflow-y:auto;display:none;direction:ltr;text-align:left}
+  .results.on{display:block}
+  .results .test{padding:8px 0;border-bottom:1px solid #1a1a1a}
+  .results .test:last-child{border-bottom:none}
+  .test .name{font-weight:700;margin-bottom:4px}
+  .test .ok{color:#0fa15a}
+  .test .er{color:#f4212e}
+  .test .wa{color:#f4d35e}
+  .test .in{color:#1d9bf0}
+  .test .detail{color:#71767b;font-size:11px;margin-top:2px;word-break:break-all}
+  .verdict{margin-top:16px;padding:16px;border-radius:10px;font-weight:600;text-align:center;display:none}
+  .verdict.on{display:block}
+  .verdict.pass{background:#0a3d24;color:#0fa15a;border:1px solid #0fa15a}
+  .verdict.fail{background:#3d0a14;color:#f4212e;border:1px solid #f4212e}
+  .info{background:#1d2024;padding:14px;border-radius:8px;margin-top:20px;font-size:13px;line-height:1.7;color:#a9b1b9}
+  .info strong{color:#f4d35e}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🩺 أداة فحص works12</h1>
+  <div class="sub">يتحقق من أن الإصلاح وُصل لـ Supabase ويعمل على المتصفح الحالي</div>
+
+  <div class="field">
+    <label>📧 بريد المساعد المراد فحصه (مثلاً neng13tiara@gmail.com)</label>
+    <input type="email" id="email" placeholder="someone@example.com"/>
+  </div>
+
+  <button class="btn" onclick="runDiagnose()">▶ تشغيل الفحص</button>
+
+  <div class="verdict" id="verdict"></div>
+  <div class="results" id="results"></div>
+
+  <div class="info">
+    <strong>⚠️ تنبيه مهم:</strong> افتح هذه الصفحة على نفس النطاق المنشور — مثل:
+    <code style="background:#000;padding:2px 8px;border-radius:4px;color:#0fa15a">https://works12.netlify.app/diagnose.html</code><br>
+    إن فتحتها من File Explorer (file://) فلن يعمل الفحص بسبب CORS.
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co'; // سيُكتشف تلقائياً
+const SUPABASE_KEY = 'YOUR-ANON-KEY';                    // سيُكتشف تلقائياً
+
+const results = document.getElementById('results');
+const verdict = document.getElementById('verdict');
+
+function clearResults(){
+  results.innerHTML = '';
+  results.classList.remove('on');
+  verdict.classList.remove('on','pass','fail');
+}
+
+function addTest(name, status, detail){
+  results.classList.add('on');
+  const cls = status === true ? 'ok' : status === false ? 'er' : status;
+  const icon = status === true ? '✅' : status === false ? '❌' : status === 'wa' ? '⚠️' : 'ℹ️';
+  const div = document.createElement('div');
+  div.className = 'test';
+  div.innerHTML = `<div class="name ${cls}">${icon} ${name}</div>${detail ? `<div class="detail">${detail}</div>`:''}`;
+  results.appendChild(div);
+}
+
+function setVerdict(pass, msg){
+  verdict.className = 'verdict on ' + (pass ? 'pass' : 'fail');
+  verdict.textContent = msg;
+}
+
+async function runDiagnose(){
+  clearResults();
+  const email = (document.getElementById('email').value || '').trim().toLowerCase();
+  if(!email){ alert('أدخل البريد أولاً'); return; }
+
+  // === Test 1: Protocol check ===
+  if(location.protocol === 'file:'){
+    addTest('Protocol check', false, 'أنت تفتح الصفحة من file:// — يجب فتحها من https://your-site.netlify.app/diagnose.html');
+    setVerdict(false, '❌ فشل الفحص — أعد فتح الصفحة من Netlify (https://)');
+    return;
+  } else {
+    addTest('Protocol check', true, location.href);
+  }
+
+  // === Test 2: Detect Supabase config from same-origin index.html ===
+  let supaUrl = null, supaKey = null;
+  try{
+    const indexResp = await fetch('/index.html', {cache:'no-store'});
+    if(indexResp.ok){
+      const txt = await indexResp.text();
+      const urlMatch = txt.match(/url:\s*['"](https:\/\/[a-z0-9-]+\.supabase\.co)['"]/);
+      const keyMatch = txt.match(/anonKey:\s*['"](eyJ[A-Za-z0-9._\-]+)['"]/);
+      if(urlMatch) supaUrl = urlMatch[1];
+      if(keyMatch) supaKey = keyMatch[1];
+    }
+  }catch(e){}
+  if(supaUrl && supaKey){
+    addTest('Supabase config detection', true, `URL: ${supaUrl.slice(0,40)}...`);
+  } else {
+    addTest('Supabase config detection', false, 'فشل قراءة BACKEND_CONFIG من index.html');
+    setVerdict(false, '❌ تعذّر اكتشاف إعدادات Supabase');
+    return;
+  }
+
+  // === Test 3: Detect fix marker in index.html ===
+  try{
+    const indexResp = await fetch('/index.html', {cache:'no-store'});
+    const txt = await indexResp.text();
+    const hasFix = txt.includes('[fix v3] ✅ integrated') || txt.includes('permsAutoSync') || txt.includes('[FIX] ✅ promoted in cloud');
+    if(hasFix){
+      addTest('Fix integrated in index.html', true, 'الإصلاح موجود داخل الملف المنشور ✓');
+    } else {
+      addTest('Fix integrated in index.html', false, 'لم يُعثر على علامات الإصلاح في index.html — لم ترفع الملف الجديد إلى Netlify');
+      setVerdict(false, '❌ الإصلاح غير مرفوع — استخدم apply-fix.html ثم ارفع index.html الجديد');
+      return;
+    }
+  }catch(e){
+    addTest('Fix integrated check', 'wa', 'تعذّر فحص index.html: ' + e.message);
+  }
+
+  // === Test 4: Check Supabase users table accessibility ===
+  try{
+    const r = await fetch(supaUrl + '/rest/v1/users?select=email&limit=1', {
+      headers:{'apikey':supaKey,'Authorization':'Bearer '+supaKey}
+    });
+    if(r.ok){
+      addTest('Supabase users table', true, 'يمكن القراءة من anonKey ✓');
+    } else {
+      const t = await r.text();
+      addTest('Supabase users table', false, 'HTTP ' + r.status + ': ' + t.slice(0,200));
+      setVerdict(false, '❌ RLS تمنع القراءة — شغّل assistants_schema.sql في Supabase');
+      return;
+    }
+  }catch(e){
+    addTest('Supabase users table', false, e.message);
+  }
+
+  // === Test 5: Check `permissions` column exists ===
+  try{
+    const r = await fetch(supaUrl + '/rest/v1/users?select=permissions&limit=1', {
+      headers:{'apikey':supaKey,'Authorization':'Bearer '+supaKey}
+    });
+    if(r.ok){
+      addTest('Permissions column exists', true, 'العمود موجود في جدول users ✓');
+    } else {
+      const t = await r.text();
+      addTest('Permissions column exists', false, 'العمود permissions غير موجود — شغّل assistants_schema.sql');
+      setVerdict(false, '❌ عمود permissions ناقص — شغّل assistants_schema.sql في Supabase');
+      return;
+    }
+  }catch(e){
+    addTest('Permissions column', false, e.message);
+  }
+
+  // === Test 6: Lookup the email in cloud ===
+  try{
+    const r = await fetch(supaUrl + '/rest/v1/users?email=eq.' + encodeURIComponent(email) + '&select=*', {
+      headers:{'apikey':supaKey,'Authorization':'Bearer '+supaKey}
+    });
+    if(!r.ok){
+      addTest('User lookup', false, 'HTTP ' + r.status);
+      return;
+    }
+    const rows = await r.json();
+    if(!rows.length){
+      addTest('User lookup', 'wa', `البريد ${email} غير موجود في Supabase إطلاقاً`);
+      setVerdict(false, '❌ المستخدم غير مسجل في Supabase — تأكد من الإضافة الصحيحة');
+      return;
+    }
+    const u = rows[0];
+    addTest('User found in cloud', true, `Email: ${u.email}, Name: ${u.full_name||'(فارغ)'}`);
+
+    // Role check
+    if(u.role === 'admin'){
+      addTest('Role is admin (مساعد)', true, `role = ${u.role} ✓`);
+    } else {
+      addTest('Role is admin (مساعد)', false, `role = ${u.role || '(فارغ)'} — يجب أن يكون "admin"`);
+      setVerdict(false, '❌ الدور ليس admin — لم يُحدّث في Supabase. أعد إضافة المساعد بعد التأكد من رفع index.html الجديد.');
+      return;
+    }
+
+    // Permissions check
+    if(u.permissions){
+      let perms = u.permissions;
+      if(typeof perms === 'string'){ try{ perms = JSON.parse(perms); }catch(e){} }
+      const granted = Object.keys(perms).filter(k => perms[k] === true);
+      if(granted.length){
+        addTest('Permissions exist', true, `الصلاحيات: ${granted.join(', ')}`);
+      } else {
+        addTest('Permissions exist', 'wa', 'الصلاحيات موجودة لكن كلها false');
+      }
+    } else {
+      addTest('Permissions exist', false, 'حقل permissions فارغ NULL');
+      setVerdict(false, '❌ الصلاحيات ناقصة في Supabase — أعد منحها من واجهة الأدمن.');
+      return;
+    }
+
+    // Check Auth account
+    try{
+      const authR = await fetch(supaUrl + '/auth/v1/token?grant_type=password', {
+        method:'POST',
+        headers:{'apikey':supaKey,'Content-Type':'application/json'},
+        body: JSON.stringify({email:email,password:'WRONG_DUMMY_PASSWORD_FOR_TEST_'+Math.random()})
+      });
+      const authBody = await authR.json();
+      if(authBody.error_description && authBody.error_description.includes('Invalid login credentials')){
+        addTest('Auth account exists', true, 'حساب Auth موجود (كلمة المرور غلط طبعاً لأننا اختبرنا بكلمة وهمية)');
+      } else if(authBody.error_description && authBody.error_description.toLowerCase().includes('not found')){
+        addTest('Auth account exists', false, 'لا يوجد حساب Auth لهذا البريد — يجب الإضافة من واجهة الأدمن بكلمة مرور');
+      } else {
+        addTest('Auth account check', 'in', JSON.stringify(authBody).slice(0,200));
+      }
+    }catch(e){
+      addTest('Auth account check', 'wa', e.message);
+    }
+
+    setVerdict(true, '✅ كل الفحوصات نجحت! المستخدم مهيأ كمساعد أدمن. إذا لم يدخل كمساعد في متصفح آخر، قم بتنظيف cache المتصفح (Ctrl+Shift+Del → Cached images)');
+
+  }catch(e){
+    addTest('User lookup', false, e.message);
+  }
+}
+</script>
+</body>
+</html>

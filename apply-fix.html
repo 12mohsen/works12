@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>أداة إصلاح works12 — مزامنة الصلاحيات</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,sans-serif;background:#0f1419;color:#e7e9ea;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .wrap{max-width:680px;width:100%;background:#16181c;border:1px solid #2f3336;border-radius:16px;padding:36px;box-shadow:0 20px 50px rgba(0,0,0,0.4)}
+  h1{font-size:24px;margin:0 0 8px;color:#f4d35e}
+  .sub{color:#71767b;font-size:14px;margin-bottom:24px}
+  .drop{border:2px dashed #f4d35e;border-radius:14px;padding:48px 24px;text-align:center;cursor:pointer;transition:.2s;background:rgba(244,211,94,0.05)}
+  .drop:hover,.drop.dragging{background:rgba(244,211,94,0.15);border-color:#ffd700}
+  .drop .ic{font-size:64px;margin-bottom:12px}
+  .drop .t{font-size:18px;font-weight:600;margin-bottom:6px}
+  .drop .s{color:#71767b;font-size:13px}
+  #file-input{display:none}
+  .log{margin-top:24px;background:#000;border-radius:10px;padding:16px;font-family:'SF Mono','Monaco',monospace;font-size:13px;line-height:1.8;max-height:280px;overflow-y:auto;display:none}
+  .log.on{display:block}
+  .log .ok{color:#0fa15a}
+  .log .er{color:#f4212e}
+  .log .in{color:#1d9bf0}
+  .log .wa{color:#f4d35e}
+  .btn{display:block;width:100%;padding:14px;background:linear-gradient(135deg,#f4d35e,#ee964b);color:#0f1419;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;margin-top:16px;transition:.2s}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(244,211,94,0.3)}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+  .info{background:#1d2024;padding:14px;border-radius:8px;margin-top:20px;font-size:13px;line-height:1.7;color:#a9b1b9}
+  .info strong{color:#f4d35e}
+  .info ol{margin:8px 0;padding-right:20px}
+  .info code{background:#000;padding:2px 8px;border-radius:4px;color:#0fa15a;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛠️ أداة إصلاح works12</h1>
+  <div class="sub">مزامنة صلاحيات الأدمن والشركاء بين كل المتصفحات (v3)</div>
+
+  <div class="drop" id="drop">
+    <input type="file" id="file-input" accept=".html"/>
+    <div class="ic">📥</div>
+    <div class="t">اسحب ملف <code style="background:#000;padding:2px 6px;border-radius:4px;color:#0fa15a">index.html</code> هنا</div>
+    <div class="s">أو اضغط للاختيار</div>
+  </div>
+
+  <div class="log" id="log"></div>
+  <button class="btn" id="dl" disabled>⬇ تنزيل index.html المُصلَح</button>
+
+  <div class="info">
+    <strong>خطوات الاستخدام:</strong>
+    <ol>
+      <li>اسحب ملف <code>index.html</code> الحالي من جذر مشروعك</li>
+      <li>اضغط زر "تنزيل" — سيظهر ملف <code>index.html</code> الجديد</li>
+      <li>ارفع الملف الجديد إلى Netlify (يستبدل القديم)</li>
+      <li>افتح Supabase → SQL Editor — وشغّل ملف <code>assistants_schema.sql</code> مرة واحدة</li>
+    </ol>
+    <div style="margin-top:8px;color:#0fa15a">✓ بدون أي تعديل يدوي — الإصلاح مدمج كاملاً داخل index.html</div>
+  </div>
+</div>
+
+<script>
+const PATCHES = [{"name": "1: saveAssistant", "find": "function saveAssistant(){\n  var name=document.getElementById('ast-name').value.trim();\n  var email=document.getElementById('ast-email').value.trim();\n  var password=document.getElementById('ast-password').value.trim();\n  var editIdx=document.getElementById('ast-edit-id').value;\n  if(!name||!email){toast('أدخل الاسم والبريد','err');return}\n  var perms={};\n  Object.keys(ADMIN_PERMS).forEach(function(k){\n    var cb=document.getElementById('ast-p-'+k);\n    if(cb)perms[k]=cb.checked;\n  });\n  var asts=getAssistants();\n  if(editIdx!==''){\n    var i=parseInt(editIdx);\n    asts[i].name=name;\n    asts[i].email=email;\n    if(password&&password.length>=6)asts[i].password=password;\n    asts[i].permissions=perms;\n    toast('\\u2705 تم تحديث المساعد');\n  } else {\n    if(!password||password.length<6){toast('كلمة المرور يجب أن تكون 6 أحرف على الأقل','err');return}\n    if(asts.find(function(a){return a.email===email})){toast('البريد مسجل بالفعل','err');return}\n    asts.push({id:uid(),name:name,email:email,password:password,permissions:perms});\n    toast('\\u2705 تمت إضافة المساعد');\n  }\n  saveAssistants(asts);\n  closeAssistantModal();\n  renderAssistantsList();\n}", "replace": "function saveAssistant(){\n  var name=document.getElementById('ast-name').value.trim();\n  var email=document.getElementById('ast-email').value.trim().toLowerCase();\n  var password=document.getElementById('ast-password').value.trim();\n  var editIdx=document.getElementById('ast-edit-id').value;\n  if(!name||!email){toast('أدخل الاسم والبريد','err');return}\n  var perms={};\n  Object.keys(ADMIN_PERMS).forEach(function(k){\n    var cb=document.getElementById('ast-p-'+k);\n    if(cb)perms[k]=cb.checked;\n  });\n  var asts=getAssistants();\n  var isEdit=(editIdx!=='');\n  if(isEdit){\n    var i=parseInt(editIdx);\n    asts[i].name=name;asts[i].email=email;\n    if(password&&password.length>=6)asts[i].password=password;\n    asts[i].permissions=perms;\n    toast('\\u2705 تم تحديث المساعد');\n  } else {\n    if(!password||password.length<6){toast('كلمة المرور يجب أن تكون 6 أحرف على الأقل','err');return}\n    if(asts.find(function(a){return a.email===email})){toast('البريد مسجل بالفعل','err');return}\n    asts.push({id:uid(),name:name,email:email,password:password,permissions:perms});\n    toast('\\u2705 تمت إضافة المساعد — جارٍ ترقيته في السحابة...');\n  }\n  saveAssistants(asts);\n  if(isCloudMode()){\n    saveUserToSupabase({email:email,name:name,role:'admin',companyName:name}).then(function(){\n      supaUpdate('users','email',email,{permissions:JSON.stringify(perms),role:'admin'});\n      console.log('[FIX] ✅ promoted in cloud:',email);\n      toast('☁️ تمت المزامنة مع السحابة');\n    }).catch(function(e){console.error('[FIX] cloud promote failed:',e);toast('⚠️ فشل رفع المساعد للسحابة','err')});\n    if(password&&password.length>=6){\n      try{fetch(BACKEND_CONFIG.supabase.url+'/auth/v1/signup',{method:'POST',headers:{'apikey':BACKEND_CONFIG.supabase.anonKey,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:password})}).then(function(r){return r.json()}).then(function(d){console.log('[FIX] Auth signup:',(d&&d.id)?'OK':'(exists)')}).catch(function(){});}catch(e){}\n    }\n  }\n  if(currentUser&&currentUser.email===email&&(currentUser.role!=='admin'||!currentUser.isAssistant)){\n    currentUser={role:'admin',id:0,name:name,email:email,isAssistant:true,permissions:perms};\n    saveSession();\n    setTimeout(function(){toast('\\u2705 تمت ترقيتك إلى مساعد أدمن');try{showScreen('s-admin');renderAdminDashboard();}catch(e){}},800);\n  }\n  closeAssistantModal();\n  renderAssistantsList();\n}"}, {"name": "2: deleteAssistant", "find": "function deleteAssistant(idx){\n  var asts=getAssistants();\n  if(!asts[idx])return;\n  document.getElementById('confirm-msg').textContent='\\ud83d\\uddd1\\ufe0f حذف المساعد \"'+asts[idx].name+'\"؟';\n  document.getElementById('confirm-ok').onclick=function(){\n    var a=getAssistants();a.splice(idx,1);saveAssistants(a);\n    closeConfirm();toast('تم الحذف \\u2705');renderAssistantsList();\n  };\n  document.getElementById('confirm-modal').classList.add('on');\n}", "replace": "function deleteAssistant(idx){\n  var asts=getAssistants();\n  if(!asts[idx])return;\n  var astEmail=asts[idx].email;\n  document.getElementById('confirm-msg').textContent='\\ud83d\\uddd1\\ufe0f حذف المساعد \"'+asts[idx].name+'\"؟';\n  document.getElementById('confirm-ok').onclick=function(){\n    var a=getAssistants();a.splice(idx,1);saveAssistants(a);\n    if(isCloudMode()&&astEmail){supaUpdate('users','email',astEmail,{role:'customer',permissions:null}).then(function(){console.log('[FIX] demoted:',astEmail)}).catch(function(){});}\n    closeConfirm();toast('تم الحذف \\u2705');renderAssistantsList();\n  };\n  document.getElementById('confirm-modal').classList.add('on');\n}"}, {"name": "3: integrated sync", "find": "/* INIT */\nrestoreSession();\nstartAutoSync();\n</script>", "replace": "/* INIT */\nrestoreSession();\nstartAutoSync();\n\n/* ════════════════════════════════════════════════════════════════\n   🛠️ INTEGRATED FIX (v3) — مزامنة الصلاحيات بين المتصفحات\n   ════════════════════════════════════════════════════════════════ */\n(function(){\n  'use strict';\n  var TAG='[fix]';\n  var MAIN_ADMIN='abdmohsen94@gmail.com';\n  var PERMS_INTERVAL=4000;\n  function log(){try{console.log.apply(console,[TAG].concat([].slice.call(arguments)))}catch(e){}}\n  function warn(){try{console.warn.apply(console,[TAG].concat([].slice.call(arguments)))}catch(e){}}\n  function parsePerms(r){if(!r||!r.permissions)return{};if(typeof r.permissions==='string'){try{return JSON.parse(r.permissions)}catch(e){return{}}}return r.permissions;}\n  function rawGet(q){if(!isCloudMode())return Promise.resolve(null);var cfg=BACKEND_CONFIG.supabase;return fetch(cfg.url+'/rest/v1/'+q,{method:'GET',headers:{'apikey':cfg.anonKey,'Authorization':'Bearer '+cfg.anonKey,'Accept':'application/json'}}).then(function(r){if(!r.ok)return r.text().then(function(t){warn('rawGet err',r.status,t);return null});return r.json()}).catch(function(e){warn('rawGet fail',e);return null});}\n  function cloudLookupUser(email){if(!email)return Promise.resolve(null);return rawGet('users?email=eq.'+encodeURIComponent(email)+'&select=*&limit=1').then(function(rows){return(rows&&rows.length)?rows[0]:null});}\n  function upsertLocalAst(r,pw){if(!r||!r.email)return null;var perms=parsePerms(r);var asts=getAssistants();var ex=asts.find(function(a){return a.email===r.email});if(ex){ex.name=r.full_name||ex.name;ex.permissions=perms;if(pw)ex.password=pw;}else{asts.push({id:uid(),name:r.full_name||r.email,email:r.email,password:pw||'',permissions:perms,_cloud:true});}saveAssistants(asts);return{name:r.full_name||r.email,email:r.email,permissions:perms};}\n  function authAst(email,pw){if(!isCloudMode())return Promise.resolve({ok:true});var cfg=BACKEND_CONFIG.supabase;function sIn(){return fetch(cfg.url+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':cfg.anonKey,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:pw})}).then(function(r){return r.json()});}function sUp(){return fetch(cfg.url+'/auth/v1/signup',{method:'POST',headers:{'apikey':cfg.anonKey,'Content-Type':'application/json'},body:JSON.stringify({email:email,password:pw})}).then(function(r){return r.json()});}return sIn().then(function(d){if(d&&d.access_token){window._supaToken=d.access_token;return{ok:true,src:'signin'}}return sUp().then(function(s){if(s&&s.access_token){window._supaToken=s.access_token;return{ok:true,src:'signup'}}return sIn().then(function(d2){if(d2&&d2.access_token){window._supaToken=d2.access_token;return{ok:true,src:'signin2'}}return{ok:false,msg:(d&&(d.error_description||d.msg||d.error))||'كلمة المرور غير صحيحة'};});});}).catch(function(e){return{ok:false,msg:'خطأ في الاتصال'};});}\n  var _origLogin=window.doLogin;\n  window.doLogin=function(){var role=(typeof currentRole!=='undefined')?currentRole:'customer';var emailEl=document.getElementById(role==='customer'?'cust-email':'vendor-email');var pwEl=document.getElementById(role==='customer'?'cust-password':'vendor-password');if(!emailEl||!pwEl)return _origLogin.apply(this,arguments);var email=(emailEl.value||'').trim().toLowerCase();var pw=pwEl.value||'';if(!email||!pw)return _origLogin.apply(this,arguments);emailEl.value=email;if(email===MAIN_ADMIN)return _origLogin.apply(this,arguments);log('login attempt:',email);toast('⏳ جارٍ التحقق من الصلاحيات...');cloudLookupUser(email).then(function(r){if(r&&r.role==='admin'&&r.email!==MAIN_ADMIN){log('☁️ cloud says ADMIN ASSISTANT:',email);upsertLocalAst(r,pw);authAst(email,pw).then(function(a){if(!a.ok){toast(a.msg||'كلمة المرور غير صحيحة','err');return}log('✅ assistant auth via',a.src);var perms=parsePerms(r);window.currentUser={role:'admin',id:0,name:r.full_name||email,email:email,isAssistant:true,permissions:perms};try{saveSession();showScreen('s-admin');renderAdminDashboard();}catch(e){}toast('مرحباً '+(r.full_name||email)+' 🛡️');});return;}log('cloud role:',r?r.role:'(none)');_origLogin.call(window);}).catch(function(e){warn('lookup fail',e);_origLogin.call(window);});};\n  var _lastHash='';\n  function permsSync(){if(!isCloudMode())return;rawGet('users?select=email,role,full_name,permissions').then(function(rows){if(!rows||!Array.isArray(rows))return;var h='';rows.forEach(function(r){h+=(r.email||'')+':'+(r.role||'')+':'+(typeof r.permissions==='string'?r.permissions:r.permissions?JSON.stringify(r.permissions):'')+'|';});if(h===_lastHash)return;_lastHash=h;log('permsSync: تغيير مرصود');var vendors=getVendors();var allPerms=ls('mkt_permissions')||{};var pChanged=false;var vendorPermsByEmail={};rows.forEach(function(r){if(r.role==='partner'&&r.email)vendorPermsByEmail[r.email]=parsePerms(r);});vendors.forEach(function(v){if(!v.email)return;var cp=vendorPermsByEmail[v.email];if(!cp)return;var lp=allPerms[String(v.id)]||{};if(JSON.stringify(lp)!==JSON.stringify(cp)){allPerms[String(v.id)]=cp;pChanged=true;log('permsSync: تحديث صلاحيات الشريك',v.name);}});if(pChanged){ss('mkt_permissions',allPerms);var pp=document.getElementById('apg-a-permissions');if(pp&&pp.classList.contains('on')&&typeof renderVendorPermsList==='function'){try{renderVendorPermsList()}catch(e){}}if(currentUser&&currentUser.role==='vendor'){var myV=vendors.find(function(x){return x.email===currentUser.email});if(myV&&vendorPermsByEmail[currentUser.email]){toast('🔔 تم تحديث صلاحياتك من قبل الإدارة');try{if(typeof renderVendorDashboard==='function')renderVendorDashboard()}catch(e){}}}}var localAsts=getAssistants();var cloudAdmins=rows.filter(function(r){return r.role==='admin'&&r.email&&r.email!==MAIN_ADMIN;});var aChanged=false;cloudAdmins.forEach(function(r){var cp=parsePerms(r);var ex=localAsts.find(function(a){return a.email===r.email});if(!ex){localAsts.push({id:uid(),name:r.full_name||r.email,email:r.email,password:'',permissions:cp,_cloud:true});aChanged=true;log('permsSync: مساعد جديد من السحابة',r.email);}else{if(ex.name!==(r.full_name||ex.name)){ex.name=r.full_name||ex.name;aChanged=true;}if(JSON.stringify(ex.permissions||{})!==JSON.stringify(cp)){ex.permissions=cp;aChanged=true;log('permsSync: صلاحيات المساعد',r.email);}}});var cloudAdminEmails=cloudAdmins.map(function(r){return r.email});var filtered=localAsts.filter(function(a){if(a._cloud&&cloudAdminEmails.indexOf(a.email)===-1){aChanged=true;log('permsSync: حذف',a.email);return false;}return true;});if(aChanged){saveAssistants(filtered);var pp2=document.getElementById('apg-a-permissions');if(pp2&&pp2.classList.contains('on')&&typeof renderAssistantsList==='function'){try{renderAssistantsList()}catch(e){}}if(currentUser&&currentUser.isAssistant){var myA=filtered.find(function(a){return a.email===currentUser.email});if(myA&&JSON.stringify(currentUser.permissions||{})!==JSON.stringify(myA.permissions||{})){currentUser.permissions=myA.permissions;saveSession();toast('🔔 تم تحديث صلاحياتك');try{if(typeof renderAdminDashboard==='function')renderAdminDashboard()}catch(e){}}}}}).catch(function(e){warn('permsSync fail',e);});}\n  function refreshRole(){if(!currentUser||!currentUser.email)return;if(currentUser.role==='admin'&&!currentUser.isAssistant)return;if(!isCloudMode())return;cloudLookupUser(currentUser.email).then(function(r){if(!r)return;if(r.role==='admin'&&r.email!==MAIN_ADMIN){var perms=parsePerms(r);upsertLocalAst(r);if(currentUser.role!=='admin'||!currentUser.isAssistant){currentUser={role:'admin',id:0,name:r.full_name||currentUser.name,email:r.email,isAssistant:true,permissions:perms};saveSession();log('auto-promoted session');toast('🛡️ تمت ترقيتك إلى مساعد أدمن');setTimeout(function(){try{showScreen('s-admin');renderAdminDashboard();}catch(e){}},1000);}}else if(r.role==='customer'&&currentUser.isAssistant){var asts2=getAssistants().filter(function(a){return a.email!==r.email});saveAssistants(asts2);toast('⚠️ تم سحب صلاحياتك');setTimeout(function(){try{if(typeof logout==='function')logout();else location.reload();}catch(e){location.reload();}},1500);}}).catch(function(){});}\n  function selfHeal(){if(!isCloudMode())return;var asts=getAssistants();if(!asts.length)return;log('selfHeal: فحص',asts.length,'مساعد');var uploaded=0,checked=0;asts.forEach(function(a){if(!a.email)return;var em=a.email.toLowerCase();cloudLookupUser(em).then(function(r){checked++;if(!r||r.role!=='admin'){log('selfHeal: رفع',em);saveUserToSupabase({email:em,name:a.name||em,role:'admin',companyName:a.name||em}).then(function(){supaUpdate('users','email',em,{permissions:JSON.stringify(a.permissions||{}),role:'admin'});if(a.password&&a.password.length>=6){try{fetch(BACKEND_CONFIG.supabase.url+'/auth/v1/signup',{method:'POST',headers:{'apikey':BACKEND_CONFIG.supabase.anonKey,'Content-Type':'application/json'},body:JSON.stringify({email:em,password:a.password})}).catch(function(){});}catch(e){}}uploaded++;if(uploaded===1)toast('☁️ جارٍ مزامنة المساعدين القدامى...');}).catch(function(){});}if(checked===asts.length&&uploaded>0){setTimeout(function(){toast('✅ تمت مزامنة '+uploaded+' مساعد')},1500);}}).catch(function(){checked++;});});}\n  setTimeout(selfHeal,2500);\n  setTimeout(refreshRole,1500);\n  setInterval(refreshRole,30000);\n  setTimeout(permsSync,800);\n  setInterval(permsSync,PERMS_INTERVAL);\n  document.addEventListener('visibilitychange',function(){if(!document.hidden)permsSync();});\n  window.addEventListener('online',permsSync);\n  try{console.log('%c[fix v3] ✅ integrated — perms sync every '+(PERMS_INTERVAL/1000)+'s','color:#0a0;font-weight:bold');}catch(e){}\n})();\n</script>"}];
+
+const dropEl = document.getElementById('drop');
+const fileInput = document.getElementById('file-input');
+const logEl = document.getElementById('log');
+const btn = document.getElementById('dl');
+let patchedBlob = null;
+let originalName = 'index.html';
+
+function logMsg(msg, type){
+  const cls = type || 'in';
+  logEl.classList.add('on');
+  logEl.innerHTML += `<div class="${cls}">${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+dropEl.onclick = () => fileInput.click();
+dropEl.ondragover = (e) => { e.preventDefault(); dropEl.classList.add('dragging'); };
+dropEl.ondragleave = () => dropEl.classList.remove('dragging');
+dropEl.ondrop = (e) => {
+  e.preventDefault();
+  dropEl.classList.remove('dragging');
+  if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+};
+fileInput.onchange = (e) => { if(e.target.files.length) handleFile(e.target.files[0]); };
+
+async function handleFile(file){
+  logEl.innerHTML = '';
+  originalName = file.name || 'index.html';
+  logMsg(`📂 الملف: ${file.name} (${(file.size/1024).toFixed(0)} KB)`, 'in');
+
+  const text = await file.text();
+  let patched = text;
+  let appliedCount = 0;
+  let failedCount = 0;
+
+  for(const p of PATCHES){
+    if(patched.includes(p.find)){
+      patched = patched.replace(p.find, p.replace);
+      logMsg(`✅ تم تطبيق Patch ${p.name}`, 'ok');
+      appliedCount++;
+    } else if(patched.includes(p.replace)){
+      logMsg(`ℹ️ Patch ${p.name} مطبق مسبقاً (متجاوَز)`, 'wa');
+      appliedCount++;
+    } else {
+      logMsg(`❌ Patch ${p.name} — لم يُعثر على النص الأصلي`, 'er');
+      failedCount++;
+    }
+  }
+
+  logMsg(`──────────────────────────`, 'in');
+  logMsg(`📊 المجموع: ${appliedCount} ناجح، ${failedCount} فاشل`, failedCount===0?'ok':'wa');
+  logMsg(`الحجم الأصلي: ${(text.length/1024).toFixed(0)} KB`, 'in');
+  logMsg(`الحجم الجديد: ${(patched.length/1024).toFixed(0)} KB`, 'in');
+
+  if(failedCount === 0){
+    patchedBlob = new Blob([patched], { type: 'text/html;charset=utf-8' });
+    btn.disabled = false;
+    btn.textContent = '⬇ تنزيل index.html المُصلَح';
+    logMsg(`✅ جاهز للتنزيل — اضغط الزر بالأسفل`, 'ok');
+  } else {
+    btn.disabled = true;
+    logMsg(`⚠️ بعض الـ patches فشلت — قد يكون الملف مُعدَّلاً يدوياً أو من إصدار مختلف`, 'er');
+  }
+}
+
+btn.onclick = () => {
+  if(!patchedBlob) return;
+  const url = URL.createObjectURL(patchedBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = originalName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  logMsg(`📥 تم التنزيل: ${originalName}`, 'ok');
+};
+</script>
+</body>
+</html>
