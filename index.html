@@ -1249,6 +1249,20 @@ tr:hover{background:rgba(255,255,255,.03)}
   </div>
 </div>
 
+<!-- Password Recovery Modal — يظهر تلقائياً بعد الضغط على رابط الإيميل -->
+<div class="mo" id="recover-modal">
+  <div class="mc" style="max-width:420px">
+    <div class="mh"><div class="mt">🔑 تعيين كلمة مرور جديدة</div></div>
+    <div class="mb">
+      <div id="recover-email-line" style="font-size:13px;color:var(--mu);margin-bottom:12px"></div>
+      <div class="fld"><label>كلمة المرور الجديدة (6 أحرف على الأقل)</label><input type="password" id="recover-pw1" placeholder="••••••••"/></div>
+      <div class="fld"><label>تأكيد كلمة المرور</label><input type="password" id="recover-pw2" placeholder="••••••••"/></div>
+      <div id="recover-msg" style="font-size:12px;margin:8px 0;min-height:18px"></div>
+      <button class="mbtn" onclick="submitRecoveryPassword()" style="margin-top:8px">💾 حفظ كلمة المرور</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ══════════════════ STORAGE ══════════════════ */
 var _memStore={};
@@ -1508,11 +1522,17 @@ function _autoSyncCheck(){
     supaFetch('platform_settings','GET',null,'?select=id,updated_at&limit=1').catch(function(){return[]})
   ]).then(function(results){
     _syncInProgress=false;
-    // بصمة شاملة: عدد + آخر updated_at لكل جدول
+    // بصمة شاملة: عدد + أقصى updated_at لأي صف (لالتقاط تعديل أي صف وليس الأخير فقط)
     var newHash=results.map(function(r){
       if(!Array.isArray(r)||!r.length)return '0';
-      var last=r[r.length-1];
-      return r.length+'_'+(last.updated_at||last.id||'');
+      var maxU='';var maxId='';
+      for(var _i=0;_i<r.length;_i++){
+        var _u=r[_i].updated_at||'';
+        if(_u>maxU)maxU=_u;
+        var _id=String(r[_i].id||'');
+        if(_id>maxId)maxId=_id;
+      }
+      return r.length+'_'+(maxU||maxId);
     }).join('|');
     if(newHash===_lastCloudHash)return;
     _lastCloudHash=newHash;
@@ -1566,11 +1586,30 @@ function _fullSyncAll(){
     }
   }).catch(function(e){console.log('[AutoSync] products err:',e.message)});
 
-  // 2) مزامنة المستخدمين (شركاء + عملاء)
+  // 2) مزامنة المستخدمين (شركاء + عملاء + مساعدي أدمن)
   supaFetch('users','GET',null,'?select=*').then(function(rows){
     if(!rows||!Array.isArray(rows))return;
     var localV=getVendors();var localC=getCustomers();var vChanged=false;var cChanged=false;
+    /* === مزامنة المساعدين أيضاً ضمن نفس الاستدعاء === */
+    var localAsts=getAssistants();
+    var astChanged=false;
+    var astCloudEmails=[];
     rows.forEach(function(r){
+      if(r.role==='admin'&&r.email&&r.email!=='abdmohsen94@gmail.com'){
+        astCloudEmails.push(r.email);
+        var astPerms=r.permissions?((typeof r.permissions==='string')?JSON.parse(r.permissions):r.permissions):{};
+        var astCloudPw=r.password||'';
+        var existAst=localAsts.find(function(a){return a.email===r.email});
+        if(!existAst){
+          localAsts.push({name:r.full_name,email:r.email,password:astCloudPw,permissions:astPerms,_cloud:true});
+          astChanged=true;
+        } else {
+          if(JSON.stringify(existAst.permissions||{})!==JSON.stringify(astPerms)){existAst.permissions=astPerms;astChanged=true}
+          if(r.full_name&&existAst.name!==r.full_name){existAst.name=r.full_name;astChanged=true}
+          /* مزامنة كلمة المرور الجديدة من السحابة (التي ضبطها الأدمن) */
+          if(astCloudPw&&existAst.password!==astCloudPw){existAst.password=astCloudPw;astChanged=true}
+        }
+      }
       if(r.role==='partner'){
         var lv=localV.find(function(v){return v.email===r.email});
         if(lv){
@@ -1620,6 +1659,35 @@ function _fullSyncAll(){
       }
     }
     if(cChanged){saveCustomers(localC);anyChange=true}
+    /* === تطبيق تغييرات المساعدين وحذف من رحل === */
+    var astBefore=localAsts.length;
+    localAsts=localAsts.filter(function(a){return !a._cloud||astCloudEmails.indexOf(a.email)!==-1});
+    if(localAsts.length!==astBefore)astChanged=true;
+    if(astChanged){
+      saveAssistants(localAsts);anyChange=true;
+      try{
+        if(currentUser&&currentUser.isAssistant){
+          var meAst=localAsts.find(function(a){return a.email===currentUser.email});
+          if(meAst){
+            currentUser.permissions=meAst.permissions||{};
+            if(typeof saveSession==='function'){try{saveSession()}catch(e){}}
+            if(typeof renderAdminDashboard==='function'){try{renderAdminDashboard()}catch(e){}}
+            var _pgMap={'a-partners':'can_manage_partners','a-customers':'can_manage_customers','a-categories':'can_manage_categories','a-allproducts':'can_manage_products','a-allorders':'can_manage_orders','a-messages':'can_view_messages','a-settings':'can_manage_settings','a-permissions':'can_manage_permissions'};
+            var _openPg=document.querySelector('#s-admin .dpg.on');
+            if(_openPg){
+              var _pgId=(_openPg.id||'').replace('apg-','');
+              if(_pgMap[_pgId]&&!hasPermission(_pgMap[_pgId])){
+                try{goApg('a-overview')}catch(e){}
+                toast('تم تحديث صلاحياتك من قِبَل الأدمن','info');
+              }
+            }
+          } else {
+            toast('تم إلغاء حسابك من قِبَل الأدمن','err');
+            setTimeout(function(){try{logout()}catch(e){location.reload()}},1500);
+          }
+        }
+      }catch(e){console.warn('[AutoSync] assistants live err:',e)}
+    }
   }).catch(function(e){console.log('[AutoSync] users err:',e.message)});
 
   // 3) مزامنة الطلبات — السحابة هي المصدر الوحيد (بدون تكرار)
@@ -2298,16 +2366,33 @@ function supaSignIn(email,password){
 }
 
 /* ── نسيت كلمة المرور Supabase ── */
-function supaResetPassword(email){
+function supaResetPassword(email,redirectTo){
   if(!isCloudMode())return Promise.resolve(null);
   var url=BACKEND_CONFIG.supabase.url+'/auth/v1/recover';
+  /* المسار الافتراضي: نفس عنوان الموقع المنشور (لا localhost) */
+  var redir=redirectTo||(location.origin+location.pathname+'#reset=1');
   return fetch(url,{
     method:'POST',
     headers:{
       'apikey':BACKEND_CONFIG.supabase.anonKey,
       'Content-Type':'application/json'
     },
-    body:JSON.stringify({email:email})
+    body:JSON.stringify({email:email,redirect_to:redir})
+  }).then(function(r){return r.json()});
+}
+
+/* ── تحديث كلمة مرور المستخدم الحالي (لتدفق Recovery) ── */
+function supaUpdateUserPassword(accessToken,newPassword){
+  if(!isCloudMode())return Promise.resolve(null);
+  var url=BACKEND_CONFIG.supabase.url+'/auth/v1/user';
+  return fetch(url,{
+    method:'PUT',
+    headers:{
+      'apikey':BACKEND_CONFIG.supabase.anonKey,
+      'Authorization':'Bearer '+accessToken,
+      'Content-Type':'application/json'
+    },
+    body:JSON.stringify({password:newPassword})
   }).then(function(r){return r.json()});
 }
 
@@ -2623,18 +2708,58 @@ function syncFromCloud(){
     if(!rows||!rows.length)return;
     var localAsts=getAssistants();
     var merged=false;
+    var cloudEmails=[];
     rows.forEach(function(r){
       if(r.email==='abdmohsen94@gmail.com')return; // skip main admin
+      cloudEmails.push(r.email);
       var exists=localAsts.find(function(a){return a.email===r.email});
       var perms=r.permissions?((typeof r.permissions==='string')?JSON.parse(r.permissions):r.permissions):{};
+      var cloudPw=r.password||'';
       if(!exists){
-        localAsts.push({name:r.full_name,email:r.email,password:'',permissions:perms,_cloud:true});
+        localAsts.push({name:r.full_name,email:r.email,password:cloudPw,permissions:perms,_cloud:true});
         merged=true;
       } else {
-        exists.name=r.full_name;exists.permissions=perms;merged=true;
+        exists.name=r.full_name;exists.permissions=perms;
+        if(cloudPw&&exists.password!==cloudPw){exists.password=cloudPw}
+        merged=true;
       }
     });
-    if(merged){saveAssistants(localAsts);console.log('[CloudSync] تم دمج مساعدي الأدمن')}
+    // === حذف المساعدين الذين أزيلوا من السحابة محلياً ===
+    var before=localAsts.length;
+    localAsts=localAsts.filter(function(a){return !a._cloud||cloudEmails.indexOf(a.email)!==-1});
+    if(localAsts.length!==before)merged=true;
+    if(merged){
+      saveAssistants(localAsts);
+      console.log('[CloudSync] تم دمج مساعدي الأدمن');
+      /* === تحديث جلسة المساعد لحظياً إذا كان مسجلاً دخوله الآن === */
+      try{
+        if(currentUser&&currentUser.isAssistant){
+          var me=localAsts.find(function(a){return a.email===currentUser.email});
+          if(me){
+            currentUser.permissions=me.permissions||{};
+            ss('mkt_session',currentUser);
+            // إعادة بناء القوائم الجانبية لتعكس الصلاحيات الجديدة
+            if(typeof renderAdminDashboard==='function'){
+              try{renderAdminDashboard()}catch(e){}
+            }
+            // لو كان داخل صفحة لم يعد له صلاحية فيها → ارجعه للوحة الرئيسية
+            var pgMap={'a-partners':'can_manage_partners','a-customers':'can_manage_customers','a-categories':'can_manage_categories','a-allproducts':'can_manage_products','a-allorders':'can_manage_orders','a-messages':'can_view_messages','a-settings':'can_manage_settings','a-permissions':'can_manage_permissions'};
+            var openPg=document.querySelector('#s-admin .dpg.on');
+            if(openPg){
+              var pgId=(openPg.id||'').replace('apg-','');
+              if(pgMap[pgId]&&!hasPermission(pgMap[pgId])){
+                try{goApg('a-overview')}catch(e){}
+                toast('تم تحديث صلاحياتك من قِبَل الأدمن','info');
+              }
+            }
+          } else {
+            /* المساعد حُذف من السحابة → خروج تلقائي */
+            toast('تم إلغاء حسابك من قِبَل الأدمن','err');
+            setTimeout(function(){try{logout()}catch(e){location.reload()}},1500);
+          }
+        }
+      }catch(e){console.warn('[CloudSync] live perms refresh err:',e)}
+    }
   }).catch(function(){});
 
   // 4) تحميل الأقسام من Supabase
@@ -3173,6 +3298,14 @@ function doLogin(){
     // هل هو مساعد أدمن؟
     var ast=getAssistants().find(function(a){return a.email===email});
     if(ast){
+      /* مسار سريع: كلمة مرور محلية مطابقة (التي ضبطها/حدّثها الأدمن) → دخول مباشر */
+      if(ast.password&&ast.password===pw){
+        currentUser={role:'admin',id:0,name:ast.name,email:ast.email,isAssistant:true,permissions:ast.permissions};
+        saveSession();showScreen('s-admin');renderAdminDashboard();toast('مرحباً '+ast.name+' 🛡️');
+        /* محاولة هادئة لمزامنة Auth بكلمة المرور الجديدة */
+        if(isCloudMode()){try{supaSignUp(email,pw,{full_name:ast.name,role:'admin'}).catch(function(){})}catch(e){}}
+        return;
+      }
       smartAuth(email,pw).then(function(r){
         if(!r.ok){toast(r.msg||'كلمة المرور غير صحيحة','err');return}
         currentUser={role:'admin',id:0,name:ast.name,email:ast.email,isAssistant:true,permissions:ast.permissions};
@@ -3210,6 +3343,12 @@ function doLogin(){
     // هل هو مساعد أدمن؟
     var astV=getAssistants().find(function(a){return a.email===vemail});
     if(astV){
+      if(astV.password&&astV.password===vpw){
+        currentUser={role:'admin',id:0,name:astV.name,email:astV.email,isAssistant:true,permissions:astV.permissions};
+        saveSession();showScreen('s-admin');renderAdminDashboard();toast('مرحباً '+astV.name+' 🛡️');
+        if(isCloudMode()){try{supaSignUp(vemail,vpw,{full_name:astV.name,role:'admin'}).catch(function(){})}catch(e){}}
+        return;
+      }
       smartAuth(vemail,vpw).then(function(r){
         if(!r.ok){toast(r.msg||'كلمة المرور غير صحيحة','err');return}
         currentUser={role:'admin',id:0,name:astV.name,email:astV.email,isAssistant:true,permissions:astV.permissions};
@@ -6696,16 +6835,52 @@ function saveAssistant(){
   var asts=getAssistants();
   if(editIdx!==''){
     var i=parseInt(editIdx);
+    var oldEmail=asts[i].email;
     asts[i].name=name;
     asts[i].email=email;
     if(password&&password.length>=6)asts[i].password=password;
     asts[i].permissions=perms;
     toast('\u2705 تم تحديث المساعد');
+    /* === دفع التحديث للسحابة فوراً ليصل لجهاز المساعد === */
+    if(isCloudMode()){
+      var _matchEmail=oldEmail||email;
+      /* الحمولة الأساسية */
+      var _payload={full_name:name,email:email,permissions:JSON.stringify(perms),role:'admin'};
+      /* إن غُيّرت كلمة المرور: ادفعها لجدول users لتُزامَن لجهاز المساعد */
+      if(password&&password.length>=6){_payload.password=password}
+      supaFetch('users','GET',null,'?email=eq.'+encodeURIComponent(_matchEmail)+'&select=id').then(function(rs){
+        if(rs&&rs.length){
+          syncUserToSupabase(_matchEmail,_payload);
+        } else {
+          /* لا يوجد سجل سحابي → إنشاؤه الآن (upsert) */
+          var _ins=Object.assign({email:email,full_name:name,role:'admin',permissions:JSON.stringify(perms)},password&&password.length>=6?{password:password}:{});
+          supaFetch('users','POST',_ins).catch(function(){});
+        }
+      }).catch(function(){
+        syncUserToSupabase(_matchEmail,_payload);
+      });
+      /* محاولة تحديث كلمة مرور Auth (لو فشلت لا بأس — local password سيكون البديل) */
+      if(password&&password.length>=6){
+        try{supaSignUp(email,password,{full_name:name,role:'admin'}).catch(function(){})}catch(e){}
+      }
+    }
   } else {
     if(!password||password.length<6){toast('كلمة المرور يجب أن تكون 6 أحرف على الأقل','err');return}
     if(asts.find(function(a){return a.email===email})){toast('البريد مسجل بالفعل','err');return}
     asts.push({id:uid(),name:name,email:email,password:password,permissions:perms});
     toast('\u2705 تمت إضافة المساعد');
+    /* === إنشاء/تحديث سجل المساعد في السحابة (upsert) === */
+    if(isCloudMode()){
+      supaFetch('users','GET',null,'?email=eq.'+encodeURIComponent(email)+'&select=id').then(function(rows){
+        if(rows&&rows.length){
+          syncUserToSupabase(email,{full_name:name,permissions:JSON.stringify(perms),role:'admin',password:password});
+        } else {
+          supaFetch('users','POST',{email:email,full_name:name,role:'admin',permissions:JSON.stringify(perms),password:password}).catch(function(){});
+        }
+      }).catch(function(){});
+      /* إنشاء حساب Auth بصمت — لو موجود مسبقاً نتجاهل الخطأ */
+      try{supaSignUp(email,password,{full_name:name,role:'admin'}).catch(function(){})}catch(e){}
+    }
   }
   saveAssistants(asts);
   closeAssistantModal();
@@ -6715,13 +6890,102 @@ function editAssistant(idx){openAssistantModal(idx)}
 function deleteAssistant(idx){
   var asts=getAssistants();
   if(!asts[idx])return;
+  var astEmail=asts[idx].email;
   document.getElementById('confirm-msg').textContent='\ud83d\uddd1\ufe0f حذف المساعد "'+asts[idx].name+'"؟';
   document.getElementById('confirm-ok').onclick=function(){
     var a=getAssistants();a.splice(idx,1);saveAssistants(a);
+    /* === حذف من السحابة أيضاً === */
+    if(isCloudMode()&&astEmail){deleteUserFromSupabase(astEmail)}
     closeConfirm();toast('تم الحذف \u2705');renderAssistantsList();
   };
   document.getElementById('confirm-modal').classList.add('on');
 }
+
+
+/* ══════════════════ PASSWORD RECOVERY HANDLER ══════════════════ */
+/* يتعامل مع رابط الإيميل: #access_token=...&type=recovery&... */
+window._recoveryToken=null;
+window._recoveryEmail='';
+function _parseHashParams(){
+  var h=(location.hash||'').replace(/^#/,'');
+  var out={};if(!h)return out;
+  h.split('&').forEach(function(kv){
+    var i=kv.indexOf('=');
+    if(i>-1)out[decodeURIComponent(kv.slice(0,i))]=decodeURIComponent(kv.slice(i+1));
+  });
+  return out;
+}
+function openRecoveryModal(token,email){
+  window._recoveryToken=token;
+  window._recoveryEmail=email||'';
+  var line=document.getElementById('recover-email-line');
+  if(line)line.textContent=email?('🔑 أدخل كلمة المرور الجديدة لـ '+email+' (6 أحرف على الأقل):'):'🔑 أدخل كلمة المرور الجديدة (6 أحرف على الأقل):';
+  var pw1=document.getElementById('recover-pw1');if(pw1)pw1.value='';
+  var pw2=document.getElementById('recover-pw2');if(pw2)pw2.value='';
+  var msg=document.getElementById('recover-msg');if(msg){msg.textContent='';msg.style.color=''}
+  var mo=document.getElementById('recover-modal');if(mo)mo.classList.add('on');
+}
+function closeRecoveryModal(){
+  var mo=document.getElementById('recover-modal');if(mo)mo.classList.remove('on');
+  /* تنظيف الـ hash حتى لا يفتح من جديد عند إعادة التحميل */
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
+  window._recoveryToken=null;window._recoveryEmail='';
+}
+function submitRecoveryPassword(){
+  var pw1=(document.getElementById('recover-pw1')||{}).value||'';
+  var pw2=(document.getElementById('recover-pw2')||{}).value||'';
+  var msg=document.getElementById('recover-msg');
+  if(!pw1||pw1.length<6){if(msg){msg.style.color='var(--er)';msg.textContent='❌ كلمة المرور يجب أن تكون 6 أحرف على الأقل'}return}
+  if(pw1!==pw2){if(msg){msg.style.color='var(--er)';msg.textContent='❌ كلمتا المرور غير متطابقتين'}return}
+  if(!window._recoveryToken){if(msg){msg.style.color='var(--er)';msg.textContent='❌ انتهت صلاحية الرابط — اطلب رابطاً جديداً'}return}
+  if(msg){msg.style.color='var(--in)';msg.textContent='⏳ جارٍ الحفظ...'}
+  supaUpdateUserPassword(window._recoveryToken,pw1).then(function(res){
+    if(res&&res.id){
+      /* نجاح — نحدّث جدول users بنفس كلمة المرور حتى تتزامن مع الأجهزة */
+      try{if(window._recoveryEmail){syncUserToSupabase(window._recoveryEmail,{password:pw1})}}catch(e){}
+      if(msg){msg.style.color='var(--ok2)';msg.textContent='✅ تم تحديث كلمة المرور — يمكنك تسجيل الدخول الآن'}
+      setTimeout(function(){
+        closeRecoveryModal();
+        try{showScreen('s-login')}catch(e){}
+        toast('✅ تم تحديث كلمة المرور — سجّل دخولك');
+      },1200);
+    } else {
+      var err=(res&&(res.msg||res.error_description||res.error))||'تعذّر تحديث كلمة المرور';
+      if(msg){msg.style.color='var(--er)';msg.textContent='❌ '+err}
+    }
+  }).catch(function(){
+    if(msg){msg.style.color='var(--er)';msg.textContent='❌ خطأ في الاتصال — حاول مرة أخرى'}
+  });
+}
+/* الكشف عن رابط الاستعادة عند تحميل الصفحة */
+(function _checkRecoveryHashOnLoad(){
+  try{
+    var p=_parseHashParams();
+    if(p.type==='recovery'&&p.access_token){
+      /* استخراج البريد من JWT payload لإظهاره للمستخدم */
+      var emailOut='';
+      try{
+        var payloadB64=p.access_token.split('.')[1];
+        if(payloadB64){
+          var pad='='.repeat((4-payloadB64.length%4)%4);
+          var json=atob((payloadB64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+          var payload=JSON.parse(json);
+          emailOut=payload.email||'';
+        }
+      }catch(e){}
+      /* نضع التوكن في الذاكرة كذلك ليُستخدم في مكالمات API */
+      window._supaToken=p.access_token;
+      /* انتقل لصفحة تسجيل الدخول وأظهر مودال الاستعادة */
+      setTimeout(function(){
+        try{showScreen('s-login')}catch(e){}
+        openRecoveryModal(p.access_token,emailOut);
+      },300);
+    } else if(p.error||p.error_description){
+      setTimeout(function(){toast('❌ '+(p.error_description||p.error),'err')},600);
+      try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
+    }
+  }catch(e){console.warn('[Recovery] parse err:',e)}
+})();
 
 /* INIT */
 restoreSession();
